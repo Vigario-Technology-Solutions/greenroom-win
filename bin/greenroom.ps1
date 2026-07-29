@@ -508,8 +508,26 @@ if (-not $sessions) {
 if ($Instance) {
     $sel = @($sessions | Where-Object { $_.Instance -eq $Instance })
     if (-not $sel) {
+        # An elevated session cannot be NAMED from an unelevated shell -- reading
+        # its command line across the integrity boundary returns NULL -- so it
+        # lands in $sessions as Opaque and never matches by name. Left alone, this
+        # reports "no session named X" for an instance that is running perfectly
+        # well, and the elevation handling below is unreachable for exactly the
+        # instances that need it.
+        #
+        # config.json is readable at any integrity level, so the instance's
+        # elevated flag is still trustworthy here. If it says elevated and there
+        # is something opaque running, re-run elevated -- where the name resolves
+        # normally and the session is found. Escalation exits; under -NoElevate it
+        # explains instead.
+        if (-not (Test-SelfElevated) -and
+            @($sessions | Where-Object Opaque).Count -gt 0 -and
+            (Test-InstanceElevated -Name $Instance)) {
+            Assert-CanActOnInstance -Name $Instance
+        }
         Write-Host "no greenroom session named '$Instance'. Running:" -ForegroundColor Yellow
         $sessions | ForEach-Object { Write-Host "  $($_.Instance)  (pid $($_.Pid))" }
+        Show-ElevatedVisibilityHint
         exit 1
     }
     $s = $sel[0]
