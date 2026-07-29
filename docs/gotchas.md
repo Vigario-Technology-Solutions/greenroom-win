@@ -65,10 +65,29 @@ On a host running two instances, both sessions walk up to the *same*
 Taking the first one is a coin flip on every attach and detach — this is the normal
 two-instance case, not an edge case.
 
-**Fix:** Claude Code titles the window with the working directory's leaf name, plus
-an animated spinner glyph — so match on substring, never equality. When that still
-does not resolve uniquely, print the candidates and refuse. Acting on the wrong
-window hides or reveals the wrong session, which is worse than doing nothing.
+**Fix:** launch the session with `--name <instance>`. Claude Code renders the
+window title as `<glyph> <name>`, so the title becomes something greenroom
+controls and can match on.
+
+Match the name **anchored at the end**. Two independent reasons:
+
+- the leading glyph is an animated spinner and changes while the session works
+  (observed as `✳` idle and `⠂` busy), so the front of the string is not stable;
+- an unanchored substring lets `admin` match `admin-2`, which leaves the shorter
+  instance permanently unresolvable — the same collision the watchdog's
+  command-line pattern already guards against.
+
+When it still does not resolve uniquely, print the candidates and refuse. Acting
+on the wrong window hides or reveals the wrong session, which is worse than doing
+nothing.
+
+> **Earlier versions of this document claimed Claude Code titles the window with
+> the working directory's leaf name. That was wrong.** Without `--name` the title
+> is `Claude Code` until the conversation acquires an auto-generated title, and
+> then it is *that* — it changes as the conversation changes and is never tied to
+> the directory. Matching the leaf therefore found nothing against a live session,
+> and the failure was masked because resolution short-circuits whenever the host
+> process owns only one window.
 
 ---
 

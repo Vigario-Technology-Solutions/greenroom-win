@@ -6,6 +6,13 @@ Notable changes between released versions. Format follows
 
 ## Unreleased
 
+### Changed
+
+- Sessions are launched with `--name <instance>`, which makes Claude Code render
+  the window title as `<glyph> <instance>`. Window resolution matches that name
+  anchored at the end of the title — the leading glyph is an animated spinner, and
+  an unanchored match would let `admin` match `admin-2`.
+
 ### Fixed
 
 - Each watchdog restart began a new conversation rather than continuing the
