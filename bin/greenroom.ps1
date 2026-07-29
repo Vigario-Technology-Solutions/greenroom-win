@@ -36,7 +36,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('attach', 'detach', 'status', 'toggle', 'list')]
+    [ValidateSet('attach', 'detach', 'status', 'toggle', 'list', 'restart')]
     [string]$Action = 'status',
 
     [Parameter(Position = 1)]
@@ -298,10 +298,134 @@ function Resolve-SessionWindow {
             Write-Host '  killed instead of exiting. Restarting the instance clears them.' -ForegroundColor Yellow
         }
         Write-Host '  refusing to guess -- acting on the wrong window would hide or reveal the wrong session.' -ForegroundColor Yellow
-        Write-Host '  to restart, stop the watchdog by process first; Start-ScheduledTask alone will not' -ForegroundColor Yellow
-        Write-Host '  restart anything, because the new watchdog exits on the single-instance guard.' -ForegroundColor Yellow
+        Write-Host "  to restart it and pick the title up:  greenroom restart $Name" -ForegroundColor Yellow
     }
     return $null
+}
+
+# Restart an instance's session.
+#
+# This exists because the procedure it replaces did not work. The advice was to
+# stop the watchdog by process and then Start-ScheduledTask -- but stopping the
+# watchdog leaves the session running, and the new watchdog then ADOPTS it. The
+# result is the old session with a new supervisor, which is precisely not a
+# restart. Measured on the reference host 2026-07-29: an instance reinstalled with
+# -Elevated kept running at Medium integrity through exactly that sequence.
+#
+# Order matters. The watchdog goes first: kill the session first and the watchdog
+# immediately restarts it, so the subsequent task start is a no-op against a
+# session that never went away.
+#
+# Everything is driven from the instance NAME, the task and config.json -- never
+# from session discovery. Discovery reads CommandLine, which is NULL across
+# integrity levels, so a discovery-driven restart would be unusable from an
+# unelevated shell against an elevated instance. Test-InstanceElevated reads
+# config.json and works regardless.
+function Restart-Instance {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $task = "greenroom-$Name"
+    if (-not (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue)) {
+        Write-Host "no scheduled task '$task' -- is '$Name' installed?" -ForegroundColor Yellow
+        exit 1
+    }
+
+    # Re-verify identity immediately before each kill. A pid recorded moments ago
+    # can already belong to something else; on 2026-07-29 a launcher exited between
+    # enumeration and termination and only this check prevented killing whatever
+    # inherited its pid.
+    function Stop-Verified {
+        param([string]$ProcName, [string]$Pattern, [string]$Label)
+        $n = 0
+        foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='$ProcName'" -ErrorAction SilentlyContinue |
+                         Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match $Pattern })) {
+            $live = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue
+            if (-not $live) { continue }
+            if ($live.CommandLine -notmatch $Pattern) {
+                Write-Host "  skipped pid $($p.ProcessId) -- no longer matches $Label" -ForegroundColor DarkYellow
+                continue
+            }
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-Host "  stopped $Label (pid $($p.ProcessId))"
+            $n++
+        }
+        return $n
+    }
+
+    $esc = [regex]::Escape($Name)
+
+    # Refuse to restart the instance this shell is running inside. Stopping the
+    # session would kill an ancestor of this process, so the script dies partway
+    # through and Start-ScheduledTask never runs -- leaving the instance DOWN. The
+    # most natural way to invoke this is from inside the session, which is exactly
+    # the case that would brick it.
+    $ancestor = $PID
+    for ($hop = 0; $hop -lt 8 -and $ancestor; $hop++) {
+        $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor" -ErrorAction SilentlyContinue
+        if (-not $p) { break }
+        if ($p.Name -eq 'claude.exe' -and $p.CommandLine -match "--remote-control\s+$esc\b") {
+            Write-Host "'$Name' is the session this shell is running inside." -ForegroundColor Yellow
+            Write-Host '  Restarting it from here would kill this process partway through, before the' -ForegroundColor Yellow
+            Write-Host '  task is started again -- leaving the instance down rather than restarted.' -ForegroundColor Yellow
+            Write-Host ''
+            Write-Host '  Run it from a shell outside the session:' -ForegroundColor Yellow
+            Write-Host "    greenroom restart $Name"
+            exit 6
+        }
+        $ancestor = $p.ParentProcessId
+    }
+
+    Write-Host "restarting '$Name'..."
+
+    # Watchdog first, or it resurrects the session before the task ever runs.
+    $w = Stop-Verified -ProcName 'pwsh.exe'   -Pattern "greenroom-watchdog.*-Instance\s+`"?$esc\b" -Label 'watchdog'
+    $c = Stop-Verified -ProcName 'claude.exe' -Pattern "--remote-control\s+$esc\b"                  -Label 'session'
+    $l = Stop-Verified -ProcName 'pwsh.exe'   -Pattern "greenroom-launch.*-Instance\s+`"?$esc\b"    -Label 'launcher'
+    if (($w + $c + $l) -eq 0) { Write-Host '  nothing was running' -ForegroundColor DarkGray }
+
+    Start-Sleep -Seconds 2
+    Start-ScheduledTask -TaskName $task
+
+    # Confirm by observation. The task returning success only means the watchdog
+    # was launched, not that a session came up behind it.
+    $deadline = (Get-Date).AddSeconds(45)
+    $found = $null
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 750
+        $found = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.CommandLine -match "--remote-control\s+$esc\b" } | Select-Object -First 1
+        if ($found) { break }
+    }
+
+    if ($found) {
+        Write-Host "  session up, claude pid $($found.ProcessId)" -ForegroundColor Green
+        exit 0
+    }
+
+    # Unelevated against an elevated instance cannot read CommandLine, so absence
+    # here is not evidence of failure -- say so rather than reporting a false one.
+    if ((Test-InstanceElevated -Name $Name) -and -not (Test-SelfElevated)) {
+        Write-Host '  cannot confirm from an unelevated shell: an elevated session is unreadable here.' -ForegroundColor Yellow
+        Write-Host "  re-check with:  greenroom list   (elevated)" -ForegroundColor Yellow
+        exit 0
+    }
+    Write-Host '  session did NOT come up within 45s.' -ForegroundColor Yellow
+    Write-Host "  check: Get-Content `"$env:USERPROFILE\.claude\greenroom\$Name\watchdog.log`" -Tail 20"
+    exit 1
+}
+
+if ($Action -eq 'restart') {
+    if (-not $Instance) {
+        $known = @(Get-ChildItem (Join-Path $env:USERPROFILE '.claude\greenroom') -Directory -ErrorAction SilentlyContinue)
+        if ($known.Count -eq 1) { $Instance = $known[0].Name }
+        else {
+            Write-Host 'restart needs an instance name. Installed:' -ForegroundColor Yellow
+            $known | ForEach-Object { Write-Host "  $($_.Name)" }
+            exit 1
+        }
+    }
+    Assert-CanActOnInstance -Name $Instance
+    Restart-Instance -Name $Instance
 }
 
 $sessions = @(Get-AllSessions)
