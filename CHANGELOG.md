@@ -15,6 +15,15 @@ Notable changes between released versions. Format follows
 
 ### Fixed
 
+- The launcher did not stop when its working directory was unreachable. Because
+  `$ErrorActionPreference` is `Continue`, both the directory creation and the
+  `Set-Location` could fail while execution carried on, and Claude Code then
+  launched in the inherited directory — `$env:USERPROFILE`, the home directory,
+  which is the one place Remote Control will not connect from. Silently, inside a
+  hidden window. Reaching it needs only a working directory on a network share
+  that is not mapped yet when the logon task fires. Both steps are now checked and
+  fatal, and the launcher confirms it actually landed in the target directory.
+
 - A session whose hosting shell was killed rather than exited left its Windows
   Terminal window behind, frozen at its last title. Because that title carries the
   instance name, the replacement session produced a second window with the same
