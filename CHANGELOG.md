@@ -6,6 +6,32 @@ Notable changes between released versions. Format follows
 
 ## Unreleased
 
+### Added
+
+- `install.ps1 -Elevated` runs an instance's session with a full admin token
+  (task `RunLevel Highest`). **Off by default and never implied by anything else.**
+  It is inherited on a bare re-run like other remembered parameters, announces
+  itself each time because it is security-relevant, and is revoked with
+  `-Elevated:$false`.
+
+  Elevation breaks attach and detach, which is the reason it needs deliberate
+  opt-in rather than being a convenience. UIPI stops an unelevated shell from
+  driving an elevated window, and `ShowWindow`/`SetForegroundWindow` fail by
+  returning `false` — no error, no prompt. `greenroom.ps1` therefore reads the new
+  `elevated` field from `config.json` and refuses *before* acting, exiting 4 with
+  the elevated re-run command, rather than printing `attached` over a window that
+  never moved. `greenroom list` still works unelevated — enumeration is permitted
+  across integrity levels even though acting is not — and grew an `Elevated`
+  column, since nothing on screen otherwise distinguishes such a session.
+
+  Two behaviours are documented as **unverified** rather than assumed: whether
+  registering `RunLevel Highest` requires an elevated installer (it is attempted,
+  and a refusal prints the elevated re-run line), and whether
+  `Win32_Process.CommandLine` is readable for a higher-integrity process of the
+  same user — if it is not, a running elevated session is indistinguishable from a
+  stopped one, so a hint is printed whenever an elevated instance is installed and
+  discovery finds nothing.
+
 ### Changed
 
 - Sessions are launched with `--name <instance>`, which makes Claude Code render

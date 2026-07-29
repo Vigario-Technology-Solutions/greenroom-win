@@ -1,6 +1,6 @@
 # Why it is built this way
 
-Five Windows behaviours defeated more obvious designs. Each one is the reason for a
+Six Windows behaviours defeated more obvious designs. Each one is the reason for a
 specific piece of the architecture, and each cost real debugging time that is
 invisible in the finished code.
 
@@ -116,6 +116,52 @@ nothing.
 > the directory. Matching the leaf therefore found nothing against a live session,
 > and the failure was masked because resolution short-circuits whenever the host
 > process owns only one window.
+
+## 6. An elevated session cannot be attached from an unelevated shell
+
+Elevation is opt-in per instance (`install.ps1 -Elevated`), and it is off by
+default. The reason it needs a flag rather than being the obvious default is not
+only that an always-on agent with a Remote Control channel should not casually hold
+an admin token — it is that **elevation breaks attach and detach**, in the silent
+way.
+
+User Interface Privilege Isolation stops a lower-integrity process from driving a
+higher-integrity window. `ShowWindow` and `SetForegroundWindow` against an elevated
+session's window from a normal shell do not raise, do not prompt, and do not warn:
+they **return `false` and change nothing**. The script would print `attached` and
+the window would stay hidden.
+
+That is the worst possible shape for this project. Everything here is already
+invisible because the window is hidden; a call that reports success while doing
+nothing removes the last signal there was.
+
+**Fix:** `install.ps1` records `elevated` in `config.json`, and `greenroom.ps1`
+checks it *before* touching a window. If the instance is elevated and the shell is
+not, it refuses, explains why, and exits 4 — rather than performing a no-op and
+claiming otherwise.
+
+Enumeration is a different matter and is deliberately still allowed:
+`EnumWindows`, `GetClassName` and `GetWindowText` work fine across integrity
+levels, so `greenroom list` still reports elevated instances correctly and marks
+them. Only *acting* is blocked.
+
+Two things about elevated instances that are **not** established, and are marked as
+such in the code rather than guessed at:
+
+- whether `Register-ScheduledTask` with `RunLevel Highest` requires the installer
+  itself to be elevated — the installer attempts it and, if refused, prints the
+  elevated re-run command instead of failing obscurely;
+- whether `Win32_Process.CommandLine` is readable for a higher-integrity process of
+  the same user. If it is not, an elevated session is running but invisible to
+  discovery, which looks exactly like "not running". `greenroom` prints a hint
+  whenever an elevated instance is installed and nothing was found, so the
+  ambiguity is visible instead of being silently resolved the wrong way.
+
+There is no UAC prompt at any point. The task trigger supplies the elevated token
+directly, which is the only reason this is viable for a session that starts hidden
+at logon — a UAC dialog behind a hidden window is an invisible hang. The flip side
+is that **nothing on screen distinguishes an elevated session from a normal one**,
+so `greenroom list` grew an `Elevated` column to make it legible.
 
 ---
 

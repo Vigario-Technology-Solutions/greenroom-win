@@ -55,10 +55,36 @@ With a directory grant:
 | `-AdditionalDirectories` | per-instance grants, **default none** |
 | `-TriggerDelay` | logon delay, default `PT1M` |
 | `-ClaudeExe` | override CLI detection |
+| `-Elevated` | run the session as admin, **default off** — see below |
 | `-NoTrustSeed`, `-NoStart` | skip those steps |
 
 Idempotent — re-run any time. It will not kill a running session; new config
 applies at the next restart.
+
+### Elevated instances
+
+`-Elevated` registers the task with `RunLevel Highest`, so the session runs with a
+full admin token and no UAC prompt. It is **off by default and never implied**.
+
+Two consequences worth knowing before you use it:
+
+- **`attach` and `detach` then require an elevated shell as well.** UIPI stops a
+  normal shell from showing or hiding an elevated window, and the underlying calls
+  fail by returning `false` rather than erroring. `greenroom` checks first and
+  refuses with an explanation rather than reporting a success that did not happen.
+  `greenroom list` still works unelevated and marks which instances are elevated.
+- **Nothing on screen distinguishes an elevated session.** There is no prompt and
+  no badge. If the account is shared, anyone who can reach the Remote Control
+  channel reaches an admin shell.
+
+Elevation is inherited on a bare re-run, like grants and the working directory, and
+says so each time. Revoke it explicitly:
+
+```powershell
+.\install.ps1 -Instance desktop-admin -Elevated:$false
+```
+
+Background: [docs/gotchas.md §6](docs/gotchas.md).
 
 **Before you install**, read [docs/provisioning.md](docs/provisioning.md). Two
 prerequisites fail *silently* if unmet — a CLI without `--remote-control`, and

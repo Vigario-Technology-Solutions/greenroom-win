@@ -65,12 +65,76 @@ public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
 $SW_HIDE = 0; $SW_RESTORE = 9
 
-function Get-InstanceWorkingDirLeaf {
+function Get-InstanceConfig {
     param([string]$Name)
     $cfg = Join-Path $env:USERPROFILE ".claude\greenroom\$Name\config.json"
     if (-not (Test-Path $cfg)) { return $null }
-    try { return Split-Path ((Get-Content $cfg -Raw | ConvertFrom-Json).workingDirectory) -Leaf }
-    catch { return $null }
+    try { return Get-Content $cfg -Raw | ConvertFrom-Json } catch { return $null }
+}
+
+function Get-InstanceWorkingDirLeaf {
+    param([string]$Name)
+    $c = Get-InstanceConfig -Name $Name
+    if (-not $c -or -not $c.workingDirectory) { return $null }
+    try { return Split-Path $c.workingDirectory -Leaf } catch { return $null }
+}
+
+function Test-InstanceElevated {
+    param([string]$Name)
+    $c = Get-InstanceConfig -Name $Name
+    # Absent key means an instance installed before -Elevated existed, which by
+    # definition was not elevated.
+    return [bool]($c -and $c.elevated)
+}
+
+function Test-SelfElevated {
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Session discovery reads Win32_Process.CommandLine to find the --remote-control
+# token. Whether that property is readable for a HIGHER-integrity process of the
+# same user was not established on the reference host -- it may return empty, in
+# which case an elevated session is running and simply invisible here.
+#
+# Rather than assert either way, this fires only when the evidence is suggestive:
+# an elevated instance is installed, and nothing was found. "Not running" and
+# "running but unreadable from here" look identical, and quietly reporting the
+# first when it is the second is exactly the wrong-diagnosis trap.
+function Show-ElevatedVisibilityHint {
+    if (Test-SelfElevated) { return }
+    $root = Join-Path $env:USERPROFILE '.claude\greenroom'
+    if (-not (Test-Path $root)) { return }
+    $elev = @(Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+              Where-Object { Test-InstanceElevated -Name $_.Name })
+    if ($elev.Count -eq 0) { return }
+    Write-Host ''
+    Write-Host "note: these instances are installed ELEVATED: $($elev.Name -join ', ')" -ForegroundColor DarkYellow
+    Write-Host '  This shell is not elevated. An elevated session may be running and simply' -ForegroundColor DarkYellow
+    Write-Host '  not visible here -- confirm from an elevated shell before concluding it is' -ForegroundColor DarkYellow
+    Write-Host '  down, and before starting a second one on top of it.' -ForegroundColor DarkYellow
+}
+
+# An unelevated shell cannot show, hide or foreground a window owned by an elevated
+# process: UIPI blocks the calls across integrity levels, and ShowWindow reports
+# failure by returning false rather than raising. Acting anyway would print
+# "attached" and do nothing -- a silent failure behind a hidden window, which is
+# the one outcome this project refuses to produce. So check first and say why.
+function Assert-CanActOnInstance {
+    param([string]$Name)
+    if (-not (Test-InstanceElevated -Name $Name)) { return }
+    if (Test-SelfElevated) { return }
+
+    Write-Host "'$Name' runs ELEVATED, and this shell does not." -ForegroundColor Yellow
+    Write-Host '  UIPI blocks ShowWindow/SetForegroundWindow from a lower integrity level, so' -ForegroundColor Yellow
+    Write-Host '  attach and detach would report success and do nothing at all.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  Re-run from an elevated shell:' -ForegroundColor Yellow
+    Write-Host "    Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-Command','greenroom $Action $Name'"
+    Write-Host ''
+    Write-Host '  Or drop elevation for this instance:' -ForegroundColor Yellow
+    Write-Host "    .\install.ps1 -Instance $Name -Elevated:`$false"
+    exit 4
 }
 
 function Get-AllSessions {
@@ -185,7 +249,11 @@ function Resolve-SessionWindow {
 $sessions = @(Get-AllSessions)
 
 if ($Action -eq 'list') {
-    if (-not $sessions) { Write-Host 'no greenroom sessions running.' -ForegroundColor Yellow; exit 1 }
+    if (-not $sessions) {
+        Write-Host 'no greenroom sessions running.' -ForegroundColor Yellow
+        Show-ElevatedVisibilityHint
+        exit 1
+    }
     $sessions | ForEach-Object {
         $th = Get-TerminalHost $_.Claude
         $vis = $null; $hnd = $null
@@ -199,13 +267,26 @@ if ($Action -eq 'list') {
             TerminalPid = if ($th) { $th.ProcessId } else { $null }
             Window      = if ($hnd) { $hnd } else { 'unresolved' }
             Visible     = $vis
+            Elevated    = Test-InstanceElevated -Name $_.Instance
         }
     } | Format-Table -AutoSize
+
+    # Listing an elevated instance from an unelevated shell works -- enumerating and
+    # reading window titles is permitted across integrity levels even though acting
+    # on them is not. Say so here, so the difference is discovered by reading rather
+    # than by an attach that appears to succeed.
+    if (-not (Test-SelfElevated)) {
+        $needElev = @($sessions | Where-Object { Test-InstanceElevated -Name $_.Instance })
+        if ($needElev.Count -gt 0) {
+            Write-Host "note: $($needElev.Count) instance(s) above run elevated; attach/detach on them needs an elevated shell." -ForegroundColor DarkYellow
+        }
+    }
     exit 0
 }
 
 if (-not $sessions) {
     Write-Host 'no greenroom session running.' -ForegroundColor Yellow
+    Show-ElevatedVisibilityHint
     if ($Instance) { Write-Host "start it with:  Start-ScheduledTask -TaskName greenroom-$Instance" }
     else { Write-Host 'start one with: Start-ScheduledTask -TaskName greenroom-<instance>' }
     exit 1
@@ -228,6 +309,8 @@ else {
     $sessions | ForEach-Object { Write-Host "  $($_.Instance)  (pid $($_.Pid))" }
     exit 1
 }
+
+Assert-CanActOnInstance -Name $s.Instance
 
 $th = Get-TerminalHost $s.Claude
 if (-not $th) {

@@ -33,6 +33,14 @@ param(
     # Default is none, on purpose: an instance boots with access to its working
     # directory and nothing else unless you grant more here.
     [string[]]$AdditionalDirectories = @(),
+    # Run the session elevated (task RunLevel Highest). OFF by default and never
+    # implied by anything else -- an always-on agent with a Remote Control channel
+    # is the last thing that should acquire admin as a side effect.
+    #
+    # The cost is not just risk: an elevated session cannot be attached or detached
+    # from an unelevated shell, because UIPI blocks the window calls. See
+    # docs/gotchas.md section 6. Pass -Elevated:$false to revoke it.
+    [switch]$Elevated,
     [switch]$NoTrustSeed,
     [switch]$NoStart
 )
@@ -451,6 +459,23 @@ foreach ($d in $AdditionalDirectories) {
     $grants += (Resolve-Path $d).Path
 }
 
+# Elevation inherits on a bare re-run, for the same reason grants and the working
+# directory do: the installer is documented as idempotent and safe to re-run, so a
+# re-run that silently dropped elevation would leave an instance that still looks
+# installed but can no longer do the work it was elevated for -- and the failure
+# would surface later, as an access-denied inside a hidden window.
+#
+# Inheriting a SECURITY-relevant setting deserves more noise than inheriting a
+# trigger delay, so this announces itself on every re-run rather than passing
+# quietly. -Elevated:$false is the explicit revocation, mirroring
+# -AdditionalDirectories @().
+$elevatedExplicit = $PSBoundParameters.ContainsKey('Elevated')
+if (-not $elevatedExplicit -and $prevCfg -and $prevCfg.elevated) {
+    $Elevated = $true
+    Say "  ..    keeping ELEVATED from the previous install"
+    Say "        pass -Elevated:`$false to drop it"
+}
+
 [PSCustomObject]@{
     instance              = $Instance
     claudeExe             = $claude
@@ -461,6 +486,10 @@ foreach ($d in $AdditionalDirectories) {
     workingDirectory      = $WorkingDirectory
     triggerDelay          = $TriggerDelay
     additionalDirectories = $grants
+    # Read by greenroom.ps1 to decide whether it can act on this instance's window
+    # at all. It is recorded here rather than re-derived from the registered task
+    # because greenroom.ps1 must know BEFORE it tries and silently fails.
+    elevated              = [bool]$Elevated
     wt                    = $wt
     pwsh                  = $pwsh
     installedUtc          = (Get-Date).ToUniversalTime().ToString('o')
@@ -613,9 +642,19 @@ $trigger.Delay = $TriggerDelay
 
 # Interactive = runs in the logged-on desktop session, which is required: the
 # session hosts a real Windows Terminal window that you attach to on demand.
-# Limited = no elevation.
+#
+# RunLevel is Limited unless -Elevated was asked for. Highest runs the task with
+# the user's full admin token and, because the trigger is a scheduled task rather
+# than an interactive launch, produces NO UAC prompt -- which is the only reason
+# this works at all for a session that starts hidden at logon. A UAC dialog behind
+# a hidden window is an invisible hang, the exact failure class this project
+# exists to avoid.
+#
+# That silence cuts both ways: nothing on screen distinguishes an elevated session
+# from an unelevated one. greenroom.ps1 reads config.json to tell them apart.
+$runLevel = if ($Elevated) { 'Highest' } else { 'Limited' }
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
-    -LogonType Interactive -RunLevel Limited
+    -LogonType Interactive -RunLevel $runLevel
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
@@ -631,10 +670,43 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Say "  ..    removed pre-existing task '$TaskName'"
 }
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Principal $principal -Settings $settings `
-    -Description "Always-on greenroom session '$Instance' in $WorkingDirectory. Started hidden at logon; attach with greenroom.ps1." | Out-Null
+$desc = "Always-on greenroom session '$Instance' in $WorkingDirectory. Started hidden at logon; attach with greenroom.ps1."
+if ($Elevated) { $desc += ' RUNS ELEVATED.' }
+
+try {
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings -Description $desc | Out-Null
+} catch {
+    # Registering RunLevel Highest may require the installer itself to be elevated.
+    # Whether it does was NOT established on the reference host -- so rather than
+    # demanding elevation up front and adding friction that may be unnecessary,
+    # this attempts it and explains precisely what to do if the attempt is refused.
+    if ($Elevated -and $_.Exception.Message -match 'Access is denied|denied') {
+        throw @"
+Refused to register '$TaskName' with RunLevel Highest: access denied.
+
+Re-run this installer from an ELEVATED shell:
+  Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-File','$PSCommandPath','-Instance','$Instance','-Elevated'
+
+Nothing was changed for this instance's task.
+"@
+    }
+    throw
+}
 Ok "task             : $TaskName (delay $TriggerDelay)"
+
+if ($Elevated) {
+    Warn 'this instance RUNS ELEVATED (task RunLevel Highest).'
+    Write-Host '          Every tool call it makes carries a full admin token, with no UAC' -ForegroundColor Yellow
+    Write-Host '          prompt and nothing on screen to distinguish it from an unelevated' -ForegroundColor Yellow
+    Write-Host '          session. If the account is shared, everyone who can reach the' -ForegroundColor Yellow
+    Write-Host '          Remote Control channel reaches an admin shell.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '          attach/detach now REQUIRE an elevated shell too -- UIPI blocks the' -ForegroundColor Yellow
+    Write-Host '          window calls from a lower integrity level. See docs/gotchas.md #6.' -ForegroundColor Yellow
+    Write-Host '          To revoke:  .\install.ps1 -Instance ' -NoNewline -ForegroundColor Yellow
+    Write-Host "$Instance -Elevated:`$false" -ForegroundColor Yellow
+}
 
 # ----------------------------------------------------------------- start/verify
 
