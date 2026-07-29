@@ -1,0 +1,14 @@
+{
+  "name": "greenroom-win",
+  "private": true,
+  "description": "Tooling-only manifest: this repository is PowerShell, and node is here solely to run commitlint.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0"
+  }
+}

@@ -1,0 +1,70 @@
+name: main subject
+
+# A notification, not a gate. The commit already exists on main by the time this
+# runs, so it can enforce nothing -- and that is not a reason to drop it.
+#
+# git-cliff is configured with `filter_unconventional = true`, so a subject it
+# cannot parse is not reported in raw form: it is dropped, and the release notes
+# are quietly missing a change forever. This job is what makes that loud. The
+# failure names the commit and the response is then chosen deliberately -- reword
+# it, merge a correction, or accept the omission knowingly.
+#
+# It is also the ONLY check that sees a rebase merge. Rebase replays the branch's
+# commits onto main verbatim, so the pull-request-title check does not cover them.
+# Measured on this repository: a branch commit reading
+# `feat: make attach work ... and stop       dropping sessions ...` is 129
+# characters with a run of spaces from a wrap artifact. It fails commitlint and
+# git-cliff skips it silently. Squash-merging discards it harmlessly; a rebase
+# merge would land it on main and lose it from the changelog with no signal at all.
+#
+# NOT a required check: it runs after the merge, so requiring it could only ever
+# block the next unrelated pull request.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  main-subject:
+    name: main-subject
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Needs the pushed range, not just the tip: a rebase merge lands several
+          # commits at once and every one of them is changelog input.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Lint every subject this push added
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          # A force-push or an initial push can leave `before` pointing at
+          # nothing reachable, in which case the only defensible range is the tip
+          # commit alone -- linting the entire history would fail on anything that
+          # predates the convention.
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$AFTER"
+          else
+            range="$AFTER~1..$AFTER"
+          fi
+          echo "linting subjects in $range"
+          status=0
+          while IFS= read -r subject; do
+            [ -z "$subject" ] && continue
+            echo "--- $subject"
+            printf '%s\n' "$subject" | npx --no-install commitlint --verbose || status=1
+          done < <(git log --format=%s --no-merges "$range")
+          exit $status

@@ -1,0 +1,54 @@
+name: PR title
+
+# The pull request title is what lands on main. This repository squash-merges with
+# `squash_merge_commit_title=PR_TITLE` and `squash_merge_commit_message=BLANK`, so
+# the title becomes the entire commit message and the branch's own commit messages
+# are discarded. main is linear-only with no bypass actors, so a bad title cannot
+# be force-pushed away afterwards.
+#
+# It is also the only input to the changelog: git-cliff reads subjects, and cliff.toml
+# maps the type to a heading. A title that fails here would either be rejected or,
+# worse, parse as the wrong type and file a feature under Fixed forever.
+#
+# Linting commits trains the habit; linting the title protects the record. This is
+# the job with teeth.
+#
+# It reuses .commitlintrc.js rather than restating the rules, so `just title "..."`
+# locally and this check cannot disagree.
+
+on:
+  pull_request:
+    # `edited` re-runs when the title changes, so fixing a bad title turns the
+    # check green without needing an empty commit to re-trigger it.
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: pr-title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # commitlint reads the piped string and the config file; no history.
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # --ignore-scripts because there are none, and because a PowerShell
+      # repository should never execute package lifecycle scripts in CI.
+      - run: npm ci --ignore-scripts
+
+      - name: Run commitlint on the PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        # printf rather than echo: a title beginning with `-n` or `-e` is eaten by
+        # POSIX echo as a flag, so commitlint would validate a truncated string
+        # and pass something that should have failed.
+        run: printf '%s\n' "$TITLE" | npx --no-install commitlint --verbose
