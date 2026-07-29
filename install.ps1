@@ -149,10 +149,41 @@ if (-not $PSBoundParameters.ContainsKey('TriggerDelay')) {
 # -WorkingDirectory and -TriggerDelay do not have this problem because they
 # persist the VALUE, which carries forward on its own. This one persists a flag
 # ABOUT the value, so the flag has to carry forward too.
-$claudeExeExplicit = ($PSBoundParameters.ContainsKey('ClaudeExe') -and [bool]$ClaudeExe)
+$claudeExeExplicit  = ($PSBoundParameters.ContainsKey('ClaudeExe') -and [bool]$ClaudeExe)
+$claudeExeInherited = $false
 if (-not $PSBoundParameters.ContainsKey('ClaudeExe') -and $prevCfg -and $prevCfg.claudeExeExplicit -and $prevCfg.claudeExe) {
     $ClaudeExe = $prevCfg.claudeExe
-    $claudeExeExplicit = $true
+    $claudeExeExplicit  = $true
+    $claudeExeInherited = $true
+}
+
+# An explicit choice that does not exist must not be silently discarded. The
+# candidate list filters on Test-Path, so a missing path simply dropped out and
+# auto-detection took over -- while the line above had already claimed the choice
+# was being kept, and claudeExeExplicit then pinned the AUTO-DETECTED path as
+# though it were the choice. Reproduced by deleting a chosen binary and re-running:
+#
+#   ..  keeping explicitly chosen claude.exe ...\gr-vanish\claude.exe   <- claimed
+#   OK  claude code : ...\WinGet\Links\claude.exe                      <- used
+#   config: claudeExeExplicit = True on a path nobody chose
+#
+# -AdditionalDirectories already refuses a path that is not there; this is the
+# same treatment for the same reason.
+if ($claudeExeExplicit -and -not (Test-Path -LiteralPath $ClaudeExe)) {
+    $origin = if ($PSBoundParameters.ContainsKey('ClaudeExe')) { 'was passed on this run' }
+              else { "was inherited from the previous install of '$Instance'" }
+    throw @"
+-ClaudeExe '$ClaudeExe' does not exist. It $origin.
+
+Refusing to continue. Auto-detection would silently take over and be recorded as
+though it were the deliberate choice, leaving this instance on a binary nobody
+selected.
+
+Point -ClaudeExe at a binary that exists, or pass -ClaudeExe '' to revoke the
+choice and return to auto-detection.
+"@
+}
+if ($claudeExeInherited) {
     Say "  ..    keeping explicitly chosen claude.exe from the previous install"
     Say "        $ClaudeExe"
 }

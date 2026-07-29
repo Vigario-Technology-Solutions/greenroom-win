@@ -24,7 +24,9 @@ Notable changes between released versions. Format follows
   so it can be. `-ClaudeExe` is inherited too, but only when it was explicitly
   chosen — an auto-detected path is re-resolved rather than pinned, so the WinGet
   shim keeps surviving upgrades. Pass `-ClaudeExe ''` to revoke a choice, mirroring
-  `-AdditionalDirectories @()`. A `config.json` that exists but cannot be parsed is
+  `-AdditionalDirectories @()`. An explicit or inherited `-ClaudeExe` that does not
+  exist is now refused rather than silently dropped — auto-detection used to take
+  over and be recorded as though it were the deliberate choice. A `config.json` that exists but cannot be parsed is
   now a hard error rather than being treated as absent — silently falling back to
   defaults there would relocate the instance through the same route this fixes.
 
