@@ -33,13 +33,11 @@ param(
     # Default is none, on purpose: an instance boots with access to its working
     # directory and nothing else unless you grant more here.
     [string[]]$AdditionalDirectories = @(),
-    # Run the session elevated (task RunLevel Highest). OFF by default and never
-    # implied by anything else -- an always-on agent with a Remote Control channel
-    # is the last thing that should acquire admin as a side effect.
-    #
-    # The cost is not just risk: an elevated session cannot be attached or detached
-    # from an unelevated shell, because UIPI blocks the window calls. See
-    # docs/gotchas.md section 6. Pass -Elevated:$false to revoke it.
+    # Run the session elevated (task RunLevel Highest). Off by default because it
+    # CHANGES HOW THE INSTANCE IS OPERATED, not because admin is inherently alarming:
+    # an elevated session cannot be attached or detached from an unelevated shell,
+    # since UIPI blocks the window calls and they fail silently. See docs/gotchas.md
+    # section 6. Requires an elevated installer. -Elevated:$false revokes.
     [switch]$Elevated,
     [switch]$NoTrustSeed,
     [switch]$NoStart
@@ -118,6 +116,41 @@ if (-not $PSBoundParameters.ContainsKey('WorkingDirectory') -and $prevCfg -and $
     $WorkingDirectory = $prevCfg.workingDirectory
     Say "  ..    keeping working directory from the previous install"
     Say "        $WorkingDirectory"
+}
+
+# Elevation is resolved HERE, before anything is copied, seeded or registered.
+#
+# It inherits on a bare re-run for the same reason the working directory and grants
+# do: this installer is documented as idempotent, and a re-run that silently
+# dropped elevation would leave an instance that still looks installed but fails
+# later with Access Denied inside a hidden window. Unlike the others it announces
+# itself every time, because it is security-relevant. -Elevated:$false revokes.
+$elevatedExplicit = $PSBoundParameters.ContainsKey('Elevated')
+if (-not $elevatedExplicit -and $prevCfg -and $prevCfg.elevated) {
+    $Elevated = $true
+    Say "  ..    keeping ELEVATED from the previous install"
+    Say "        pass -Elevated:`$false to drop it"
+}
+
+# MEASURED on the reference host 2026-07-29, not assumed: registering a task with
+# RunLevel Highest from a non-elevated shell fails with 'Access is denied'.
+#
+# Checked up front rather than at Register-ScheduledTask, which is the last step.
+# Failing there would leave the instance half-built -- files copied, trust seeded,
+# config written -- with no task to run any of it.
+if ($Elevated -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw @"
+-Elevated requires an elevated installer.
+
+Registering a scheduled task with RunLevel Highest fails with 'Access is denied'
+from a non-elevated shell. Verified on the reference host.
+
+Re-run elevated:
+  Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-File','$PSCommandPath','-Instance','$Instance','-Elevated'
+
+Nothing has been changed.
+"@
 }
 if (-not $PSBoundParameters.ContainsKey('TriggerDelay')) {
     if ($prevCfg -and $prevCfg.triggerDelay) {
@@ -459,23 +492,6 @@ foreach ($d in $AdditionalDirectories) {
     $grants += (Resolve-Path $d).Path
 }
 
-# Elevation inherits on a bare re-run, for the same reason grants and the working
-# directory do: the installer is documented as idempotent and safe to re-run, so a
-# re-run that silently dropped elevation would leave an instance that still looks
-# installed but can no longer do the work it was elevated for -- and the failure
-# would surface later, as an access-denied inside a hidden window.
-#
-# Inheriting a SECURITY-relevant setting deserves more noise than inheriting a
-# trigger delay, so this announces itself on every re-run rather than passing
-# quietly. -Elevated:$false is the explicit revocation, mirroring
-# -AdditionalDirectories @().
-$elevatedExplicit = $PSBoundParameters.ContainsKey('Elevated')
-if (-not $elevatedExplicit -and $prevCfg -and $prevCfg.elevated) {
-    $Elevated = $true
-    Say "  ..    keeping ELEVATED from the previous install"
-    Say "        pass -Elevated:`$false to drop it"
-}
-
 [PSCustomObject]@{
     instance              = $Instance
     claudeExe             = $claude
@@ -696,16 +712,12 @@ Nothing was changed for this instance's task.
 Ok "task             : $TaskName (delay $TriggerDelay)"
 
 if ($Elevated) {
-    Warn 'this instance RUNS ELEVATED (task RunLevel Highest).'
-    Write-Host '          Every tool call it makes carries a full admin token, with no UAC' -ForegroundColor Yellow
-    Write-Host '          prompt and nothing on screen to distinguish it from an unelevated' -ForegroundColor Yellow
-    Write-Host '          session. If the account is shared, everyone who can reach the' -ForegroundColor Yellow
-    Write-Host '          Remote Control channel reaches an admin shell.' -ForegroundColor Yellow
-    Write-Host ''
-    Write-Host '          attach/detach now REQUIRE an elevated shell too -- UIPI blocks the' -ForegroundColor Yellow
-    Write-Host '          window calls from a lower integrity level. See docs/gotchas.md #6.' -ForegroundColor Yellow
-    Write-Host '          To revoke:  .\install.ps1 -Instance ' -NoNewline -ForegroundColor Yellow
-    Write-Host "$Instance -Elevated:`$false" -ForegroundColor Yellow
+    Ok "elevation        : RunLevel Highest -- session runs with a full admin token"
+    Write-Host '                     attach/detach now need an elevated shell too; UIPI blocks' -ForegroundColor DarkGray
+    Write-Host '                     the window calls from a lower integrity level (gotchas #6).' -ForegroundColor DarkGray
+    Write-Host '                     There is no UAC prompt and nothing on screen marks the' -ForegroundColor DarkGray
+    Write-Host "                     session as elevated -- 'greenroom list' is how you tell." -ForegroundColor DarkGray
+    Write-Host "                     Revoke with: .\install.ps1 -Instance $Instance -Elevated:`$false" -ForegroundColor DarkGray
 }
 
 # ----------------------------------------------------------------- start/verify

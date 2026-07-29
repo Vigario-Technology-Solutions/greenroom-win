@@ -24,13 +24,19 @@ Notable changes between released versions. Format follows
   across integrity levels even though acting is not — and grew an `Elevated`
   column, since nothing on screen otherwise distinguishes such a session.
 
-  Two behaviours are documented as **unverified** rather than assumed: whether
-  registering `RunLevel Highest` requires an elevated installer (it is attempted,
-  and a refusal prints the elevated re-run line), and whether
+  Registering `RunLevel Highest` **requires an elevated installer** — measured, it
+  returns `Access is denied` otherwise. That is checked up front rather than at
+  `Register-ScheduledTask`, which is the last step; failing there would leave the
+  instance half-built, with files copied and trust seeded but nothing registered
+  to run them.
+
+  One behaviour is documented as **unverified** rather than assumed: whether
   `Win32_Process.CommandLine` is readable for a higher-integrity process of the
-  same user — if it is not, a running elevated session is indistinguishable from a
-  stopped one, so a hint is printed whenever an elevated instance is installed and
-  discovery finds nothing.
+  same user. If it is not, `greenroom list` under-reports elevated sessions from an
+  ordinary shell, so a hint is printed whenever an elevated instance is installed
+  and discovery finds nothing. The watchdog is unaffected — `RunLevel Highest`
+  applies to the whole `wscript` → watchdog → `wt` → `claude` chain, so an elevated
+  instance's supervisor is itself elevated and always sees its own session.
 
 ### Changed
 

@@ -64,18 +64,19 @@ applies at the next restart.
 ### Elevated instances
 
 `-Elevated` registers the task with `RunLevel Highest`, so the session runs with a
-full admin token and no UAC prompt. It is **off by default and never implied**.
+full admin token and no UAC prompt. **Requires an elevated installer** — registering
+`RunLevel Highest` is refused from a normal shell.
 
-Two consequences worth knowing before you use it:
+It is off by default because it changes how the instance is operated, not as a
+security posture:
 
 - **`attach` and `detach` then require an elevated shell as well.** UIPI stops a
   normal shell from showing or hiding an elevated window, and the underlying calls
   fail by returning `false` rather than erroring. `greenroom` checks first and
   refuses with an explanation rather than reporting a success that did not happen.
   `greenroom list` still works unelevated and marks which instances are elevated.
-- **Nothing on screen distinguishes an elevated session.** There is no prompt and
-  no badge. If the account is shared, anyone who can reach the Remote Control
-  channel reaches an admin shell.
+- **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
+  `greenroom list` is how you tell.
 
 Elevation is inherited on a bare re-run, like grants and the working directory, and
 says so each time. Revoke it explicitly:

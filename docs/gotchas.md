@@ -120,10 +120,15 @@ nothing.
 ## 6. An elevated session cannot be attached from an unelevated shell
 
 Elevation is opt-in per instance (`install.ps1 -Elevated`), and it is off by
-default. The reason it needs a flag rather than being the obvious default is not
-only that an always-on agent with a Remote Control channel should not casually hold
-an admin token — it is that **elevation breaks attach and detach**, in the silent
-way.
+default — but the reason is operational, not a security posture. **Elevation breaks
+attach and detach**, in the silent way, and that is a behaviour change the operator
+has to know about rather than inherit.
+
+Registering the task at all requires an elevated installer: `RunLevel Highest`
+returns `Access is denied` from a normal shell. Measured, not assumed. The
+installer therefore checks up front rather than at `Register-ScheduledTask`, which
+is the last step — failing there would leave the instance half-built, with files
+copied and trust seeded but nothing registered to run it.
 
 User Interface Privilege Isolation stops a lower-integrity process from driving a
 higher-integrity window. `ShowWindow` and `SetForegroundWindow` against an elevated
@@ -145,17 +150,23 @@ Enumeration is a different matter and is deliberately still allowed:
 levels, so `greenroom list` still reports elevated instances correctly and marks
 them. Only *acting* is blocked.
 
-Two things about elevated instances that are **not** established, and are marked as
-such in the code rather than guessed at:
+One thing about elevated instances remains **not** established, and is marked as
+such in the code rather than guessed at: whether `Win32_Process.CommandLine` is
+readable for a higher-integrity process of the same user.
 
-- whether `Register-ScheduledTask` with `RunLevel Highest` requires the installer
-  itself to be elevated — the installer attempts it and, if refused, prints the
-  elevated re-run command instead of failing obscurely;
-- whether `Win32_Process.CommandLine` is readable for a higher-integrity process of
-  the same user. If it is not, an elevated session is running but invisible to
-  discovery, which looks exactly like "not running". `greenroom` prints a hint
-  whenever an elevated instance is installed and nothing was found, so the
-  ambiguity is visible instead of being silently resolved the wrong way.
+Discovery finds sessions by matching `--remote-control` on the command line. If
+that property comes back empty across integrity levels, a running elevated session
+is invisible and looks exactly like a stopped one.
+
+**The watchdog is not affected.** `RunLevel Highest` applies to the whole chain —
+`wscript` → watchdog → `wt` → `claude` — so an elevated instance's supervisor is
+itself elevated and can always see its own session. There is no duplicate-session
+risk from this.
+
+The exposure is limited to `greenroom.ps1` invoked from an ordinary shell, where
+`list` may under-report. It prints a hint whenever an elevated instance is
+installed and nothing was found, so the ambiguity is visible rather than silently
+resolved as "not running".
 
 There is no UAC prompt at any point. The task trigger supplies the elevated token
 directly, which is the only reason this is viable for a session that starts hidden
