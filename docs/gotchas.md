@@ -99,8 +99,8 @@ process. That was requested as [microsoft/terminal#5694][t5694] and closed
 
 [t5694]: https://github.com/microsoft/terminal/issues/5694
 
-**Fix, primary — record the handle at creation.** The watchdog is the only
-component that knows which window is which, because it is the one that made it:
+**Fix — record the handle at creation.** The watchdog is the only component that
+knows which window is which, because it is the one that made it:
 it snapshots every `CASCADIA_HOSTING` handle immediately before launching
 `wt.exe`, then takes the handle that is both *new since that snapshot* and
 *owned by the `WindowsTerminal.exe` in the session's own ancestry*. Two
@@ -109,42 +109,39 @@ fails one of them. Exactly one survivor is written to
 `~/.claude/greenroom/<instance>/session.json`; any other count records nothing
 and says so in the log rather than guessing.
 
-The stored handle is **validated on every use, never trusted**. Windows reuses
-handles after a window closes, so a stale record can name someone else's window.
-Before acting on it, greenroom requires that it is still a live `CASCADIA` window
-under *this* host process, that the recorded terminal PID matches, and that the
-recorded `claude.exe` PID is still alive. Any mismatch falls through to the title
-paths below instead of acting on a maybe.
+That record is the **only** source. There is deliberately no fallback.
 
-This matters most in the case the title cannot cover: a session stopped at a trust
-prompt or a `/login` screen has not applied `--name` yet, so it has no matching
-title at all — unresolvable exactly when attaching is the thing you need.
+The obvious alternative is to match on the window title, since the session is
+launched with `--name <instance>` and Claude Code renders the title as
+`<glyph> <name>`. Don't. The title belongs to Claude Code, not to greenroom, and
+a session sitting at a trust prompt or a `/login` screen has not applied `--name`
+yet — so it has no matching title at all, which is exactly when the operator needs
+to attach. A title fallback also hides the failure that actually matters: capture
+silently not working looks perfectly healthy right up until the day it resolves
+someone else's window. One source makes a capture failure loud on the first
+attach, and `greenroom restart <instance>` fixes it in one step.
 
-**Fix, fallback — launch with `--name <instance>`.** Claude Code renders the
-window title as `<glyph> <name>`, so the title becomes something greenroom
-controls. This still carries sessions started before the handle was recorded, and
-covers a record lost to a state-directory wipe. `greenroom restart <instance>`
-re-captures.
+The stored handle is **validated on every use, never trusted**, against a single
+invariant: the record must have been written for the session being acted on. Both
+PIDs in the record are checked against the live session the caller already
+resolved, so a record left by any earlier session fails regardless of what it
+contains. The handle is then re-enumerated rather than used directly, because
+Windows reuses handles after a window closes and a stale number can name a live
+window belonging to something else. Any mismatch refuses and names the reason —
+acting on the wrong window hides or reveals the wrong session, which is worse
+than doing nothing.
 
-Match the name **anchored at the end**. Two independent reasons:
+`--name` is still passed, because a window titled `✳ laptop-admin` is easier to
+read than `Claude Code`. Nothing depends on it.
 
-- the leading glyph is an animated spinner and changes while the session works
-  (observed as `✳` idle and `⠂` busy), so the front of the string is not stable;
-- an unanchored substring lets `admin` match `admin-2`, which leaves the shorter
-  instance permanently unresolvable — the same collision the watchdog's
-  command-line pattern already guards against.
-
-When it still does not resolve uniquely, print the candidates and refuse. Acting
-on the wrong window hides or reveals the wrong session, which is worse than doing
-nothing.
-
-> **Earlier versions of this document claimed Claude Code titles the window with
-> the working directory's leaf name. That was wrong.** Without `--name` the title
-> is `Claude Code` until the conversation acquires an auto-generated title, and
-> then it is *that* — it changes as the conversation changes and is never tied to
-> the directory. Matching the leaf therefore found nothing against a live session,
-> and the failure was masked because resolution short-circuits whenever the host
-> process owns only one window.
+> **Earlier revisions of this document prescribed title matching as the fix, and
+> before that claimed Claude Code titles the window with the working directory's
+> leaf name.** The leaf claim was simply wrong: without `--name` the title is
+> `Claude Code` until the conversation acquires an auto-generated title, and then
+> it is *that*, which changes as the conversation does and is never tied to the
+> directory. The failure was masked because resolution short-circuited whenever
+> the host process owned only one window — the single-instance case, where the
+> answer is right by luck.
 
 ## 6. An elevated session cannot be attached from an unelevated shell
 

@@ -78,13 +78,6 @@ function Get-InstanceConfig {
     try { return Get-Content $cfg -Raw | ConvertFrom-Json } catch { return $null }
 }
 
-function Get-InstanceWorkingDirLeaf {
-    param([string]$Name)
-    $c = Get-InstanceConfig -Name $Name
-    if (-not $c -or -not $c.workingDirectory) { return $null }
-    try { return Split-Path $c.workingDirectory -Leaf } catch { return $null }
-}
-
 function Test-InstanceElevated {
     param([string]$Name)
     $c = Get-InstanceConfig -Name $Name
@@ -246,82 +239,67 @@ function Get-CascadiaWindows {
     $script:grHits
 }
 
+# Resolve an instance's window from the handle the watchdog recorded when it
+# created that window. That record is the ONLY source. There is deliberately no
+# fallback.
+#
+# Windows Terminal hosts every window in one process and exposes no supported way
+# to map a hosted process to its window (microsoft/terminal#5694, Won't Fix), so
+# anything other than the record is inference from the window title -- and the
+# title belongs to Claude Code, not to greenroom. A session sitting at a trust
+# prompt or a /login screen has not applied --name yet and has no matching title
+# at all, which is exactly when the operator needs to attach.
+#
+# A title fallback would paper over that, and it would also hide the failure that
+# matters: capture silently not working looks perfectly healthy right up until the
+# day it resolves someone else's window. One source means a capture failure is
+# loud on the first attach, and `greenroom restart` fixes it in one step.
+#
+# The record is validated, never trusted. Windows reuses handles after a window
+# closes, so a stale record can name a live window belonging to something else.
 function Resolve-SessionWindow {
-    param([int]$HostPid, [string]$Name, [switch]$Quiet)
+    param([int]$HostPid, [int]$ClaudePid, [string]$Name, [switch]$Quiet)
 
-    $wins = @(Get-CascadiaWindows -HostPid $HostPid)
-    if ($wins.Count -eq 0) { return $null }
-
-    # PRIMARY. The handle the watchdog recorded when it created the window, which
-    # is the only identification that does not depend on the hosted application.
-    # Titles are owned and rewritten by Claude Code, and a session stopped at a
-    # trust dialog or a login prompt never applies --name at all -- unresolvable
-    # precisely when attaching matters most. See greenroom-watchdog.ps1.
-    #
-    # Validated, never trusted: handles are reused after a window closes, so a
-    # stale record could name someone else's window. The recorded handle must
-    # still be a live CASCADIA window under THIS host process, and the session it
-    # was captured for must still be the running one. Any mismatch falls through
-    # to the title paths rather than acting on a maybe.
     $sf = Join-Path $env:USERPROFILE ".claude\greenroom\$Name\session.json"
-    if (Test-Path $sf) {
+    $why = $null
+    $hnd = $null
+
+    if (-not (Test-Path $sf)) {
+        $why = 'no window record -- restart the instance to create one'
+    }
+    else {
         try {
-            $rec = Get-Content $sf -Raw | ConvertFrom-Json
-            $match = @($wins | Where-Object { [int64]$_.Handle -eq [int64]$rec.handle })
-            if ($match.Count -eq 1 -and [int]$rec.terminalPid -eq [int]$HostPid) {
-                $live = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$rec.claudePid)" -ErrorAction SilentlyContinue
-                if ($live -and $live.Name -eq 'claude.exe') { return $match[0].Handle }
+            $rec = Get-Content $sf -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            # An empty file parses to $null rather than throwing, which would other-
+            # wise fall through and report a mismatch against blank pids.
+            if ($null -eq $rec) { throw 'file is empty' }
+            # One invariant: this record was written for the session being acted on.
+            # Both pids come from the live session the caller already resolved, so a
+            # record from any earlier session fails here regardless of what it says.
+            if ([int]$rec.claudePid -ne $ClaudePid -or [int]$rec.terminalPid -ne $HostPid) {
+                $why = "record is for claude pid $($rec.claudePid) under terminal $($rec.terminalPid); this session is $ClaudePid under $HostPid"
             }
-        } catch { }   # unreadable or malformed record is simply not usable
+            else {
+                # Enumerate rather than trust the number: Windows reuses handles
+                # after a window closes, so the record must still name a live
+                # CASCADIA window under this host process.
+                $match = @(Get-CascadiaWindows -HostPid $HostPid |
+                           Where-Object { [int64]$_.Handle -eq [int64]$rec.handle })
+                if ($match.Count -eq 1) { $hnd = $match[0].Handle }
+                else { $why = "recorded handle $($rec.handle) is not a live console window under pid $HostPid" }
+            }
+        }
+        catch { $why = "window record is unreadable or malformed: $($_.Exception.Message)" }
     }
 
-    # SECONDARY. greenroom-launch.ps1 starts the session with `--name <instance>`,
-    # and Claude Code renders the window title as "<glyph> <name>". That title is
-    # set by Claude Code itself, so nothing has to out-fight it, and it holds even
-    # after the conversation acquires its own auto-generated name.
-    #
-    # Anchored at the END, deliberately, for two separate reasons:
-    #   - the leading glyph is an animated spinner and changes while the session
-    #     works (observed as both U+2733 idle and U+2802 busy), so the front of
-    #     the string is not stable to match on;
-    #   - an unanchored substring would let 'admin' match 'admin-2', leaving the
-    #     shorter instance permanently unresolvable. Same collision the watchdog's
-    #     command-line pattern already guards against.
-    $byName = @($wins | Where-Object { $_.Title -match ([regex]::Escape($Name) + '$') })
-    if ($byName.Count -eq 1) { return $byName[0].Handle }
-
-    # Only one window under this host process, so there is nothing to confuse it
-    # with. This also covers sessions started before --name was passed.
-    if ($wins.Count -eq 1) { return $wins[0].Handle }
-
-    # LEGACY FALLBACK. A session started by an older launcher carries Claude Code's
-    # own title instead. Note that title is NOT the working-directory leaf -- it is
-    # the conversation title, which changes as the conversation does -- so this
-    # match frequently finds nothing. Restart the instance to move it onto --name.
-    $leaf = Get-InstanceWorkingDirLeaf -Name $Name
-    if ($leaf) {
-        $m = @($wins | Where-Object { $_.Title -like "*$leaf*" })
-        if ($m.Count -eq 1) { return $m[0].Handle }
-    }
+    if ($hnd) { return $hnd }
 
     if (-not $Quiet) {
-        Write-Host "AMBIGUOUS: WindowsTerminal pid $HostPid owns $($wins.Count) console windows:" -ForegroundColor Yellow
-        $wins | ForEach-Object { Write-Host "    handle=$($_.Handle)  title='$($_.Title)'" }
-        if ($byName.Count -eq 0) {
-            Write-Host "  no window whose title ends with the session name '$Name'" -ForegroundColor Yellow
-            Write-Host '  if this instance predates --name, restarting it will pick the title up.' -ForegroundColor Yellow
-        } else {
-            # More than one window bearing this instance's name means at least one is
-            # a corpse: Windows Terminal keeps a window alive when the process hosting
-            # its tab is killed rather than exiting, frozen at its last title. The
-            # watchdog clears these before relaunching, so seeing them here means one
-            # was created after the last relaunch.
-            Write-Host "  $($byName.Count) windows end with the session name '$Name' -- at least one is stale." -ForegroundColor Yellow
-            Write-Host '  Windows Terminal keeps a window alive when the process hosting its tab is' -ForegroundColor Yellow
-            Write-Host '  killed instead of exiting. Restarting the instance clears them.' -ForegroundColor Yellow
-        }
-        Write-Host '  refusing to guess -- acting on the wrong window would hide or reveal the wrong session.' -ForegroundColor Yellow
-        Write-Host "  to restart it and pick the title up:  greenroom restart $Name" -ForegroundColor Yellow
+        Write-Host "cannot resolve the window for '$Name'." -ForegroundColor Yellow
+        Write-Host "  $why" -ForegroundColor Yellow
+        Write-Host '  refusing to guess from window titles -- acting on the wrong window would hide' -ForegroundColor Yellow
+        Write-Host '  or reveal the wrong session.' -ForegroundColor Yellow
+        Write-Host "  fix:  greenroom restart $Name" -ForegroundColor Yellow
     }
     return $null
 }
@@ -463,7 +441,7 @@ if ($Action -eq 'list') {
         $th = if ($_.Opaque) { $null } else { Get-TerminalHost $_.Claude }
         $vis = $null; $hnd = $null
         if ($th) {
-            $hnd = Resolve-SessionWindow -HostPid $th.ProcessId -Name $_.Instance -Quiet
+            $hnd = Resolve-SessionWindow -HostPid $th.ProcessId -ClaudePid $_.Pid -Name $_.Instance -Quiet
             if ($hnd) { $vis = [Greenroom.Win1]::IsWindowVisible($hnd) }
         }
         [PSCustomObject]@{
@@ -550,9 +528,9 @@ if (-not $th) {
     exit 2
 }
 
-$hwnd = Resolve-SessionWindow -HostPid $th.ProcessId -Name $s.Instance
+$hwnd = Resolve-SessionWindow -HostPid $th.ProcessId -ClaudePid $s.Pid -Name $s.Instance
 if (-not $hwnd -or $hwnd -eq [IntPtr]::Zero) {
-    Write-Host "could not resolve a unique window for '$($s.Instance)' (WindowsTerminal pid $($th.ProcessId))." -ForegroundColor Yellow
+    # Resolve-SessionWindow already printed the specific reason and the fix.
     exit 3
 }
 
