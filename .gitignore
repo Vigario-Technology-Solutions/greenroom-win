@@ -1,0 +1,5 @@
+# Windows / editor noise
+Thumbs.db
+desktop.ini
+.vscode/
+*.zip
