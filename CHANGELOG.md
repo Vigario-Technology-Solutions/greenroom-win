@@ -21,7 +21,10 @@ Notable changes between released versions. Format follows
   along with its project store, memory and transcripts. `-TriggerDelay` reset the
   same way, un-staggering a multi-instance host. Both are now inherited from the
   previous install when omitted, and `triggerDelay` is recorded in `config.json`
-  so it can be.
+  so it can be. `-ClaudeExe` is inherited too, but only when it was explicitly
+  chosen — an auto-detected path is re-resolved rather than pinned, so the WinGet
+  shim keeps surviving upgrades. Pass `-ClaudeExe ''` to revoke a choice, mirroring
+  `-AdditionalDirectories @()`.
 
 - The launcher did not stop when its working directory was unreachable. Because
   `$ErrorActionPreference` is `Continue`, both the directory creation and the

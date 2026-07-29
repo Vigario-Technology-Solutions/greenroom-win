@@ -86,6 +86,21 @@ if (-not $PSBoundParameters.ContainsKey('TriggerDelay') -and $prevCfg -and $prev
     $TriggerDelay = $prevCfg.triggerDelay
     Say "  ..    keeping trigger delay from the previous install ($TriggerDelay)"
 }
+# -ClaudeExe is the same class, but only when it was CHOSEN. config.json records
+# the RESOLVED path, so inheriting it unconditionally would pin whatever
+# auto-detection happened to pick and defeat the whole reason the WinGet Links
+# shim is preferred -- that path is package-ID-keyed and survives upgrades, and
+# freezing a resolved copy of it buys nothing while risking a stale pin if the CLI
+# is ever installed elsewhere.
+#
+# So the explicit choice is what gets remembered, not the result. Someone who
+# passed -ClaudeExe did so because auto-detection picks wrong on their host, which
+# is exactly the case where silently reverting to it on a bare re-run does damage.
+if (-not $PSBoundParameters.ContainsKey('ClaudeExe') -and $prevCfg -and $prevCfg.claudeExeExplicit -and $prevCfg.claudeExe) {
+    $ClaudeExe = $prevCfg.claudeExe
+    Say "  ..    keeping explicitly chosen claude.exe from the previous install"
+    Say "        $ClaudeExe"
+}
 
 if (-not $WorkingDirectory) { $WorkingDirectory = Join-Path $env:USERPROFILE $Instance }
 
@@ -354,6 +369,10 @@ foreach ($d in $AdditionalDirectories) {
 [PSCustomObject]@{
     instance              = $Instance
     claudeExe             = $claude
+    # Passing -ClaudeExe '' is how an explicit choice is revoked, mirroring
+    # -AdditionalDirectories @() for grants: the parameter was supplied, but it
+    # names nothing, so auto-detection resumes and nothing gets pinned.
+    claudeExeExplicit     = ($PSBoundParameters.ContainsKey('ClaudeExe') -and [bool]$ClaudeExe)
     workingDirectory      = $WorkingDirectory
     triggerDelay          = $TriggerDelay
     additionalDirectories = $grants
