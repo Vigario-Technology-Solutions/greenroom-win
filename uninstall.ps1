@@ -79,9 +79,12 @@ if ($RemoveScripts) {
         Warn "not removing scripts -- $($others.Count) other instance(s) still registered: $($others.TaskName -join ', ')"
     } elseif (Test-Path $InstallDir) {
         Remove-Item $InstallDir -Recurse -Force
-        Ok "scripts removed: $InstallDir"
-        $shim = Join-Path (Split-Path $InstallDir -Parent) 'greenroom.cmd'
-        if (Test-Path $shim) { Remove-Item $shim -Force; Ok "shim removed: $shim" }
+        Ok "internals removed: $InstallDir"
+        $shimDir = Split-Path $InstallDir -Parent
+        foreach ($f in 'greenroom.ps1', 'greenroom.cmd') {
+            $p = Join-Path $shimDir $f
+            if (Test-Path $p) { Remove-Item $p -Force; Ok "removed: $p" }
+        }
     }
 }
 
