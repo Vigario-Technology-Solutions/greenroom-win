@@ -155,7 +155,7 @@ the plain refusal for scripted callers that must not block.
 Window *enumeration* is unaffected: `EnumWindows`, `GetClassName` and
 `GetWindowText` work across integrity levels. Only acting is blocked.
 
-### Process discovery is affected, though, and that is the sharper edge
+### Process discovery is affected, and it depends on where you run from
 
 **`Win32_Process.CommandLine` is NULL for any process the querying shell lacks
 query rights on.** Measured on the reference host against `ctfmon.exe`,
@@ -169,10 +169,18 @@ token to match, so an elevated session is **visible as a process but
 unidentifiable**, and a naive filter drops it — reporting "no session running" for
 one that is running.
 
-So discovery now collects those separately and reports them as `(opaque)` rather
-than discarding them. It cannot say *which* instance an opaque process is; it can
-say that something is there and that elevation is needed to name it. That is worth
-more than a confident wrong answer.
+**This is a property of the shell, not of the session.** Run `greenroom list` from
+an elevated prompt and there is nothing unreadable: every instance resolves by name
+exactly as usual. The blind spot belongs to the observer, and the fix for it is to
+change vantage point, not configuration. The output says so rather than describing
+the sessions as though they were permanently unknowable.
+
+Unreadable processes are therefore reported as `(unreadable)` rather than
+discarded — but **only when an elevated instance is actually configured**. An
+unreadable `claude.exe` is not evidence of greenroom by itself: a host with Claude
+Desktop installed runs a dozen unrelated ones (13 on the reference host), and
+labelling one of those a probable greenroom session would be precisely the
+confident wrong answer this branch exists to avoid.
 
 The watchdog is unaffected — `RunLevel Highest` covers the whole `wscript` →
 watchdog → `wt` → `claude` chain, so an elevated instance's supervisor is itself

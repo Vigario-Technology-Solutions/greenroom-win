@@ -43,10 +43,17 @@ Notable changes between released versions. Format follows
   `Bitwarden.exe`, which enumerate normally but expose no command line. An elevated
   `claude.exe` is therefore visible but unidentifiable, and the old filter dropped
   it, reporting "no session running" for a session that was running. Such processes
-  are now surfaced as `(opaque)` with a note that elevation is needed to name them.
-  The watchdog is unaffected — `RunLevel Highest` covers the whole `wscript` →
-  watchdog → `wt` → `claude` chain, so an elevated instance's supervisor is itself
-  elevated and always sees its own session.
+  are now reported as `(unreadable)`.
+
+  That blind spot belongs to the **shell**, not the session: run `greenroom list`
+  elevated and every instance resolves by name as usual. The notes say so, and are
+  suppressed entirely when already elevated. The `(unreadable)` branch is gated on
+  an elevated instance actually being configured — a host with Claude Desktop runs
+  a dozen unrelated `claude.exe` (13 on the reference host), and calling one of
+  those a probable greenroom session would be the confident wrong answer the branch
+  exists to prevent. The watchdog is unaffected — `RunLevel Highest` covers the
+  whole `wscript` → watchdog → `wt` → `claude` chain, so an elevated instance's
+  supervisor is itself elevated and always sees its own session.
 
 ### Changed
 

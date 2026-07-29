@@ -98,15 +98,20 @@ function Test-SelfElevated {
     ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Session discovery reads Win32_Process.CommandLine to find the --remote-control
-# token. Whether that property is readable for a HIGHER-integrity process of the
-# same user was not established on the reference host -- it may return empty, in
-# which case an elevated session is running and simply invisible here.
-#
-# Rather than assert either way, this fires only when the evidence is suggestive:
-# an elevated instance is installed, and nothing was found. "Not running" and
-# "running but unreadable from here" look identical, and quietly reporting the
-# first when it is the second is exactly the wrong-diagnosis trap.
+function Test-AnyInstanceElevated {
+    $root = Join-Path $env:USERPROFILE '.claude\greenroom'
+    if (-not (Test-Path $root)) { return $false }
+    foreach ($d in (Get-ChildItem $root -Directory -ErrorAction SilentlyContinue)) {
+        if (Test-InstanceElevated -Name $d.Name) { return $true }
+    }
+    return $false
+}
+
+# "Nothing found" and "running, but unreadable from this shell" are indistinguishable
+# from an unelevated prompt, because CommandLine reads as NULL across integrity
+# levels. Reporting the first when it is the second is the wrong-diagnosis trap, so
+# when an elevated instance is installed and discovery came back empty, say which
+# of the two this might be rather than asserting the session is down.
 function Show-ElevatedVisibilityHint {
     if (Test-SelfElevated) { return }
     $root = Join-Path $env:USERPROFILE '.claude\greenroom'
@@ -116,9 +121,9 @@ function Show-ElevatedVisibilityHint {
     if ($elev.Count -eq 0) { return }
     Write-Host ''
     Write-Host "note: these instances are installed ELEVATED: $($elev.Name -join ', ')" -ForegroundColor DarkYellow
-    Write-Host '  This shell is not elevated. An elevated session may be running and simply' -ForegroundColor DarkYellow
-    Write-Host '  not visible here -- confirm from an elevated shell before concluding it is' -ForegroundColor DarkYellow
-    Write-Host '  down, and before starting a second one on top of it.' -ForegroundColor DarkYellow
+    Write-Host '  This shell is not elevated, and an elevated session is unreadable from here' -ForegroundColor DarkYellow
+    Write-Host '  -- which looks identical to nothing running. Re-run elevated before' -ForegroundColor DarkYellow
+    Write-Host '  concluding it is down, and before starting a second one on top of it.' -ForegroundColor DarkYellow
 }
 
 # An unelevated shell cannot show, hide or foreground a window owned by an elevated
@@ -183,15 +188,22 @@ function Get-AllSessions {
     # MEASURED on the reference host: Win32_Process.CommandLine comes back NULL for
     # any process this shell lacks query rights on -- confirmed against ctfmon.exe,
     # TabTip.exe and Bitwarden.exe, all of which enumerate but expose no command
-    # line. A higher-integrity claude.exe falls in exactly that class.
+    # line. A higher-integrity claude.exe falls in exactly that class, so an elevated
+    # session is VISIBLE as a process but UNIDENTIFIABLE, and the filter above drops
+    # it silently -- reporting "no session running" for one that is running.
     #
-    # So an elevated session is VISIBLE as a process but UNIDENTIFIABLE: there is no
-    # --remote-control token to match, and the plain filter above drops it silently.
-    # Dropping it would report "no session running" for a session that is running,
-    # which is the wrong-diagnosis trap this project keeps having to design against.
-    # Surface it as opaque instead and let the caller say so.
-    foreach ($p in ($all | Where-Object { -not $_.CommandLine })) {
-        [PSCustomObject]@{ Instance = '(opaque)'; Claude = $p; Pid = $p.ProcessId; Opaque = $true }
+    # This is a property of WHERE THIS SCRIPT IS RUNNING, not of the session. From an
+    # elevated shell nothing is opaque and every instance resolves by name as usual.
+    #
+    # Gated on an elevated instance actually being configured, because an unreadable
+    # claude.exe is not evidence of greenroom by itself. A host with Claude Desktop
+    # runs a dozen unrelated claude.exe (13 on the reference host), and claiming one
+    # of those is "probably an elevated session" would be a confident wrong answer of
+    # exactly the kind the opaque branch exists to avoid.
+    if (Test-AnyInstanceElevated) {
+        foreach ($p in ($all | Where-Object { -not $_.CommandLine })) {
+            [PSCustomObject]@{ Instance = '(unreadable)'; Claude = $p; Pid = $p.ProcessId; Opaque = $true }
+        }
     }
 }
 
@@ -316,24 +328,24 @@ if ($Action -eq 'list') {
         }
     } | Format-Table -AutoSize
 
-    $opaque = @($sessions | Where-Object Opaque)
-    if ($opaque.Count -gt 0) {
-        Write-Host "note: $($opaque.Count) claude.exe process(es) expose no command line to this shell." -ForegroundColor DarkYellow
-        Write-Host '  That is what a higher-integrity process looks like from here -- almost' -ForegroundColor DarkYellow
-        Write-Host '  certainly an elevated session. Which instance it is cannot be read without' -ForegroundColor DarkYellow
-        Write-Host '  elevation, so re-run this from an elevated shell to identify it.' -ForegroundColor DarkYellow
-    }
-
-    # Listing an elevated instance from an unelevated shell works -- enumerating and
-    # reading window titles is permitted across integrity levels even though acting
-    # on them is not. Say so here, so the difference is discovered by reading rather
-    # than by an attach that appears to succeed.
+    # Both notes below are about the SHELL, not the sessions. Run elevated and they
+    # both go away -- every instance resolves by name and nothing reads as unknown.
     if (-not (Test-SelfElevated)) {
-        $needElev = @($sessions | Where-Object { Test-InstanceElevated -Name $_.Instance })
+        $opaque = @($sessions | Where-Object Opaque)
+        if ($opaque.Count -gt 0) {
+            Write-Host "note: $($opaque.Count) claude.exe process(es) expose no command line to THIS shell," -ForegroundColor DarkYellow
+            Write-Host '  which is how a higher-integrity process looks from an unelevated one. They' -ForegroundColor DarkYellow
+            Write-Host '  cannot be named from here, and some may not be greenroom at all.' -ForegroundColor DarkYellow
+        }
+        $needElev = @($sessions | Where-Object { -not $_.Opaque -and (Test-InstanceElevated -Name $_.Instance) })
         if ($needElev.Count -gt 0) {
-            Write-Host "note: $($needElev.Count) instance(s) above run elevated; attach/detach on them needs an elevated shell." -ForegroundColor DarkYellow
+            Write-Host "note: $($needElev.Count) instance(s) above run elevated; attach/detach will prompt for UAC." -ForegroundColor DarkYellow
+        }
+        if ($opaque.Count -gt 0 -or $needElev.Count -gt 0) {
+            Write-Host '  Re-run this from an elevated shell for a complete, named listing.' -ForegroundColor DarkYellow
         }
     }
+
     exit 0
 }
 

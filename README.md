@@ -74,10 +74,11 @@ security posture:
   showing or hiding an elevated window, and the calls fail by returning `false`
   rather than erroring — so `greenroom` re-launches itself through UAC and the
   elevated copy does the work. Pass `-NoElevate` to get a plain refusal instead.
-- **An elevated session cannot be identified without elevation.**
+- **`greenroom list` has a blind spot unless it is run elevated too.**
   `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is
-  how instances are named. `greenroom list` reports such a process as `(opaque)`
-  rather than pretending nothing is running.
+  how instances are named — so from an ordinary shell an elevated session shows as
+  `(unreadable)` rather than by name. Run `list` elevated and the blind spot is
+  gone; it belongs to the shell, not the session.
 - **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
   `greenroom list` is how you tell.
 
