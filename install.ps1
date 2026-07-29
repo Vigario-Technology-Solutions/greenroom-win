@@ -682,31 +682,26 @@ $settings = New-ScheduledTaskSettingsSet `
 $settings.Hidden = $false
 
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Say "  ..    removed pre-existing task '$TaskName'"
+    Say "  ..    replacing pre-existing task '$TaskName'"
 }
 
 $desc = "Always-on greenroom session '$Instance' in $WorkingDirectory. Started hidden at logon; attach with greenroom.ps1."
 if ($Elevated) { $desc += ' RUNS ELEVATED.' }
 
 try {
+    # -Force replaces an existing task in one step. Unregistering first and then
+    # registering is the same thing only when registration succeeds: if it is
+    # refused -- which -Elevated can be, from an unelevated installer -- the
+    # pre-emptive unregister has already destroyed a working task, so the
+    # instance stops starting at logon and the error below ("Nothing was
+    # changed") is a lie. Replace in place so a refusal changes nothing.
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Description $desc | Out-Null
+        -Principal $principal -Settings $settings -Description $desc -Force | Out-Null
 } catch {
-    # Registering RunLevel Highest may require the installer itself to be elevated.
-    # Whether it does was NOT established on the reference host -- so rather than
-    # demanding elevation up front and adding friction that may be unnecessary,
-    # this attempts it and explains precisely what to do if the attempt is refused.
-    if ($Elevated -and $_.Exception.Message -match 'Access is denied|denied') {
-        throw @"
-Refused to register '$TaskName' with RunLevel Highest: access denied.
-
-Re-run this installer from an ELEVATED shell:
-  Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-File','$PSCommandPath','-Instance','$Instance','-Elevated'
-
-Nothing was changed for this instance's task.
-"@
-    }
+    # No access-denied special case here. -Elevated from an unelevated installer is
+    # already refused up front, so this cannot be that; and telling an operator who
+    # IS elevated to re-run elevated would be wrong advice. Whatever else failed,
+    # -Force means the previous task is still in place, so report and stop.
     throw
 }
 Ok "task             : $TaskName (delay $TriggerDelay)"
