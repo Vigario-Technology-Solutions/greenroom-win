@@ -86,12 +86,24 @@ greenroom toggle desktop-admin
 greenroom status desktop-admin
 ```
 
-`install.ps1` generates a `greenroom.cmd` shim one level above the install
-directory — `%USERPROFILE%\.local\bin` is normally already on PATH while the
-`greenroom\` subfolder is not — so the bare command works from anywhere without a
-PATH edit or a profile change.
-
 With exactly one instance running, the name can be omitted.
+
+`install.ps1` places the command in `%USERPROFILE%\.local\bin`, which is normally
+already on PATH, so no PATH edit and no profile change are needed. One command,
+one shim per shell — the shape npm's `cmd-shim` and Scoop both use:
+
+| | |
+|---|---|
+| `greenroom.ps1` | PowerShell resolves this natively from PATH, with full parameter and `ValidateSet` completion. One process |
+| `greenroom.cmd` | four-line forwarder, no logic. `.PS1` is not in `PATHEXT`, so cmd.exe and the Run box cannot run the script directly and need it |
+
+PowerShell prefers the `.ps1` over a same-named `.cmd`, so the extra shell hop is
+paid only by cmd, where it is unavoidable.
+
+```powershell
+greenroom <Tab>            # attach detach status toggle list
+greenroom attach -I<Tab>   # -Instance
+```
 
 ---
 
@@ -108,8 +120,9 @@ Task Scheduler  (at logon, +delay, Interactive, no elevation)
 
 | Path | |
 |---|---|
-| `%USERPROFILE%\.local\bin\greenroom\` | scripts, shared by all instances |
-| `%USERPROFILE%\.local\bin\greenroom.cmd` | generated shim |
+| `%USERPROFILE%\.local\bin\greenroom.ps1` | the operator command |
+| `%USERPROFILE%\.local\bin\greenroom.cmd` | generated cmd/Run-box shim |
+| `%USERPROFILE%\.local\bin\greenroom\` | watchdog, launcher, vbs entry point — task-invoked |
 | `%USERPROFILE%\.claude\greenroom\<instance>\config.json` | resolved paths and grants |
 | `%USERPROFILE%\.claude\greenroom\<instance>\watchdog.log` | supervisor log |
 | `%USERPROFILE%\.claude\greenroom\<instance>\launch.log` | per-session launch log |
