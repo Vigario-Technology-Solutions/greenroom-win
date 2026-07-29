@@ -107,7 +107,64 @@ function Get-RcClaudePid {
     if ($p) { $p.ProcessId } else { $null }
 }
 
+# Windows Terminal keeps a window alive when the process hosting its tab dies
+# abruptly rather than exiting. The window stays enumerable, frozen at whatever
+# title it had at death. Killing claude.exe does NOT do this -- the launcher then
+# exits normally and the window closes with it -- but killing the launcher shell
+# does, and so does any abnormal termination of it.
+#
+# For greenroom that corpse is not cosmetic. It holds "<glyph> <instance>", which
+# is exactly the title the replacement session will have, so greenroom.ps1 finds
+# two windows matching one name, refuses to choose, and attach breaks permanently
+# with nothing on screen to explain it.
+#
+# This runs only from Start-RcSession, which is reached only after Get-RcClaudePid
+# has confirmed no live session for this instance. Any window still bearing the
+# instance name at that moment is therefore stale by definition. Combined with the
+# single-instance mutex, no other watchdog can be launching a replacement
+# concurrently, so there is nothing live to mistake for a corpse.
+#
+# PostMessage, not SendMessage: PostMessage returns immediately, so an unresponsive
+# window cannot block the supervisor. Closing is best-effort by design.
+if (-not ('GreenroomWd.Win1' -as [type])) {
+    Add-Type -Namespace GreenroomWd -Name Win1 -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr p);
+public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+'@
+}
+
+$titlePattern = [regex]::Escape($Instance) + '$'
+
+function Close-StaleWindows {
+    $script:staleHits = @()
+    $script:stalePattern = $titlePattern
+    $cb = [GreenroomWd.Win1+EnumWindowsProc] {
+        param($h, $l)
+        $sb = New-Object System.Text.StringBuilder 256
+        [GreenroomWd.Win1]::GetClassName($h, $sb, 256) | Out-Null
+        if ($sb.ToString() -match 'CASCADIA_HOSTING') {
+            $tb = New-Object System.Text.StringBuilder 512
+            [GreenroomWd.Win1]::GetWindowText($h, $tb, 512) | Out-Null
+            if ($tb.ToString() -match $script:stalePattern) {
+                $script:staleHits += [PSCustomObject]@{ Handle = $h; Title = $tb.ToString() }
+            }
+        }
+        return $true
+    }
+    [GreenroomWd.Win1]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+
+    foreach ($w in $script:staleHits) {
+        [GreenroomWd.Win1]::PostMessage($w.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        Log "closed stale window $($w.Handle) '$($w.Title)' -- its host died without releasing it"
+    }
+    if ($script:staleHits.Count -gt 0) { Start-Sleep -Milliseconds 500 }
+}
+
 function Start-RcSession {
+    Close-StaleWindows
     # -w new forces its own window instead of a tab in an existing terminal.
     $args_ = @('-w', 'new', $pwsh, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                '-File', $inner, '-Instance', $Instance)

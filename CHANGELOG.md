@@ -15,6 +15,16 @@ Notable changes between released versions. Format follows
 
 ### Fixed
 
+- A session whose hosting shell was killed rather than exited left its Windows
+  Terminal window behind, frozen at its last title. Because that title carries the
+  instance name, the replacement session produced a second window with the same
+  name and window resolution refused to choose between them — attach broke
+  permanently. The watchdog now closes any window bearing its instance name
+  immediately before relaunching, at which point the session is already confirmed
+  dead. The ambiguity message also distinguishes "no window matched" from
+  "several matched, so one is stale", and no longer suggests `Start-ScheduledTask`
+  as a restart.
+
 - Nothing stopped a second watchdog supervising the same instance. Because
   `Stop-ScheduledTask` is a no-op against this architecture, a plain
   `Start-ScheduledTask` added a supervisor rather than replacing one, and two

@@ -142,8 +142,8 @@ function Resolve-SessionWindow {
     #   - an unanchored substring would let 'admin' match 'admin-2', leaving the
     #     shorter instance permanently unresolvable. Same collision the watchdog's
     #     command-line pattern already guards against.
-    $m = @($wins | Where-Object { $_.Title -match ([regex]::Escape($Name) + '$') })
-    if ($m.Count -eq 1) { return $m[0].Handle }
+    $byName = @($wins | Where-Object { $_.Title -match ([regex]::Escape($Name) + '$') })
+    if ($byName.Count -eq 1) { return $byName[0].Handle }
 
     # Only one window under this host process, so there is nothing to confuse it
     # with. This also covers sessions started before --name was passed.
@@ -162,10 +162,22 @@ function Resolve-SessionWindow {
     if (-not $Quiet) {
         Write-Host "AMBIGUOUS: WindowsTerminal pid $HostPid owns $($wins.Count) console windows:" -ForegroundColor Yellow
         $wins | ForEach-Object { Write-Host "    handle=$($_.Handle)  title='$($_.Title)'" }
-        Write-Host "  no window whose title ends with the session name '$Name'" -ForegroundColor Yellow
+        if ($byName.Count -eq 0) {
+            Write-Host "  no window whose title ends with the session name '$Name'" -ForegroundColor Yellow
+            Write-Host '  if this instance predates --name, restarting it will pick the title up.' -ForegroundColor Yellow
+        } else {
+            # More than one window bearing this instance's name means at least one is
+            # a corpse: Windows Terminal keeps a window alive when the process hosting
+            # its tab is killed rather than exiting, frozen at its last title. The
+            # watchdog clears these before relaunching, so seeing them here means one
+            # was created after the last relaunch.
+            Write-Host "  $($byName.Count) windows end with the session name '$Name' -- at least one is stale." -ForegroundColor Yellow
+            Write-Host '  Windows Terminal keeps a window alive when the process hosting its tab is' -ForegroundColor Yellow
+            Write-Host '  killed instead of exiting. Restarting the instance clears them.' -ForegroundColor Yellow
+        }
         Write-Host '  refusing to guess -- acting on the wrong window would hide or reveal the wrong session.' -ForegroundColor Yellow
-        Write-Host "  if this instance predates --name, restart it to pick the title up:" -ForegroundColor Yellow
-        Write-Host "      Start-ScheduledTask -TaskName greenroom-$Name" -ForegroundColor Yellow
+        Write-Host '  to restart, stop the watchdog by process first; Start-ScheduledTask alone will not' -ForegroundColor Yellow
+        Write-Host '  restart anything, because the new watchdog exits on the single-instance guard.' -ForegroundColor Yellow
     }
     return $null
 }
