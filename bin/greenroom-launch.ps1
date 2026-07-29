@@ -62,6 +62,45 @@ if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
     $claudeArgs += @($cfg.additionalDirectories)
 }
 
+# Continue the previous conversation rather than minting a new session id on every
+# restart. Without this, each watchdog restart begins a fresh conversation, and every
+# one of them shows up as a separate entry in the Claude Desktop session list. On the
+# reference host nine accumulated in a single day; eight were ~1 KB stubs holding
+# nothing but a session header.
+#
+# GUARDED ON PURPOSE. Measured, all three on the same host and build (2.1.218):
+#
+#   --session-id <uuid>, pinned per instance
+#       Create-only. The second launch exits 1 with "Session ID ... is already in
+#       use". A pinned id would work exactly once and then fail on every restart
+#       thereafter -- inside a hidden window, so the watchdog would crash-loop with
+#       nothing on screen. Dead end, do not revisit.
+#
+#   -c with NO prior transcript
+#       Exits 1 under --remote-control. This is the trap: `claude -p ... -c` in an
+#       empty directory succeeds, so a headless test proves nothing about the path
+#       this launcher actually takes. The interactive/RC path needs something to
+#       continue and fails without it.
+#
+#   -c WITH a prior transcript
+#       Session comes up, the existing transcript is appended to, no fork.
+#
+# So the flag is only safe when there is something to continue, hence the guard.
+#
+# The slug is derived from Get-Location AFTER Set-Location rather than from
+# $cfg.workingDirectory: Claude Code keys the project store on the LITERAL cwd
+# string, with every non-alphanumeric character replaced by a dash. Deriving it from
+# the resolved location is what keeps the two in agreement.
+$slug  = ((Get-Location).Path -replace '[^A-Za-z0-9]', '-')
+$store = Join-Path $env:USERPROFILE ".claude\projects\$slug"
+$prior = @(Get-ChildItem -LiteralPath $store -Filter *.jsonl -ErrorAction SilentlyContinue)
+if ($prior.Count -gt 0) {
+    $claudeArgs += '-c'
+    Log "continuing previous conversation (-c); $($prior.Count) transcript(s) in $slug"
+} else {
+    Log "no prior transcript in $slug -- starting fresh (-c would exit 1 here)"
+}
+
 Log "exec: $($cfg.claudeExe) $($claudeArgs -join ' ')"
 & $cfg.claudeExe @claudeArgs
 Log "claude exited with $LASTEXITCODE"
