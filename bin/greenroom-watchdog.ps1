@@ -44,6 +44,44 @@ function Log($m) {
     }
 }
 
+# SINGLE-INSTANCE GUARD.
+#
+# Exactly one watchdog may supervise an instance. Two is not merely redundant:
+# when the session dies they both see it inside the same 1s poll and both call
+# Start-RcSession, producing two Windows Terminal windows carrying the SAME
+# --name. Resolution then finds two matches, refuses, and attach breaks
+# permanently with nothing on screen to explain it.
+#
+# This is easy to reach by accident. Stop-ScheduledTask is a no-op against this
+# architecture -- the task runs wscript.exe, which spawns the watchdog detached
+# and returns, so the task sits at Ready with nothing left to stop. A plain
+# Start-ScheduledTask therefore ADDS a supervisor. Measured on the reference
+# host: 1 watchdog, Stop-ScheduledTask, still 1, Start-ScheduledTask, 2.
+#
+# A named mutex rather than a process scan, deliberately. Scanning races: two
+# watchdogs starting together can both look, both see nothing, and both proceed.
+# The mutex is a kernel object, so the check and the claim are one atomic step.
+# It is also self-cleaning -- if the holder is killed, its handle closes and the
+# claim is released, so a crashed watchdog never locks the instance out.
+#
+# Local\ not Global\: instances run in the interactive user's session, and
+# Global\ would let one user's watchdog block another's on a shared machine.
+$mutexName = "Local\greenroom-watchdog-$Instance"
+$script:mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$acquired = $false
+try {
+    $acquired = $script:mutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+    # The previous holder died without releasing. That means we DID acquire it,
+    # and the instance is genuinely unsupervised right now.
+    $acquired = $true
+    Log 'previous watchdog terminated without releasing its claim -- taking over'
+}
+if (-not $acquired) {
+    Log "another watchdog already supervises '$Instance' -- this one (pid $PID) is exiting"
+    exit 0
+}
+
 $cfgPath = Join-Path $stateDir 'config.json'
 if (-not (Test-Path $cfgPath)) {
     Log "FATAL: no config at $cfgPath -- run install.ps1 for this instance"

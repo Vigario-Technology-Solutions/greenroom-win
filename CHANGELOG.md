@@ -15,6 +15,15 @@ Notable changes between released versions. Format follows
 
 ### Fixed
 
+- Nothing stopped a second watchdog supervising the same instance. Because
+  `Stop-ScheduledTask` is a no-op against this architecture, a plain
+  `Start-ScheduledTask` added a supervisor rather than replacing one, and two
+  watchdogs relaunch the session together on the same poll — producing two windows
+  with the same name, which resolution refuses to choose between. The watchdog now
+  claims a per-instance named mutex at startup and exits if another holds it. The
+  claim is released if the holder is killed, so a crashed watchdog cannot lock the
+  instance out.
+
 - Each watchdog restart began a new conversation rather than continuing the
   previous one, so every restart appeared as its own entry in the Claude Desktop
   session list. `greenroom-launch.ps1` now passes `-c`, guarded on whether a
