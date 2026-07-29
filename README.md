@@ -221,7 +221,7 @@ Do not trust a green line from the installer for anything it cannot observe.
 | TUI renders as boxes | Launched under conhost. Check `wt` in `config.json` |
 | Trust dialog on first start | The seed was dropped by another Claude process. Installer re-seeds; if it reports RE-SEED FAILED, close other sessions and re-run |
 | `/rc active` missing | Not logged in, or logged in with a `setup-token` |
-| `attach` reports AMBIGUOUS | The recorded window handle is missing or stale and no title matches either. `greenroom restart <instance>` re-records it |
+| `cannot resolve the window` | The instance has no usable window record — most often a session started before the record existed. `greenroom restart <instance>` creates one |
 | Wrong `claude.exe` picked | Pass `-ClaudeExe` |
 
 Restart one instance:

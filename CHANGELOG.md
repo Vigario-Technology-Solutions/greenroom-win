@@ -8,6 +8,16 @@ Notable changes between released versions. Format follows
 
 ### Added
 
+- `greenroom restart <instance>`. The procedure it replaces did not restart
+  anything: stopping the watchdog by process and then running `Start-ScheduledTask`
+  leaves the session alive, and the new watchdog adopts it — the old session with a
+  new supervisor. Measured on the reference host: an instance reinstalled with
+  `-Elevated` kept running at Medium integrity through exactly that sequence. The
+  verb stops watchdog → session → launcher in that order, re-verifying identity
+  immediately before each kill, and everything is driven from the instance name,
+  its task and `config.json` rather than from session discovery, which reads NULL
+  across integrity levels. Refuses with exit 6 when run from inside the session it
+  would kill.
 - `install.ps1 -Elevated` runs an instance's session with a full admin token
   (task `RunLevel Highest`). **Off by default and never implied by anything else.**
   It is inherited on a bare re-run like other remembered parameters, announces
@@ -58,13 +68,44 @@ Notable changes between released versions. Format follows
 
 ### Changed
 
-- Sessions are launched with `--name <instance>`, which makes Claude Code render
-  the window title as `<glyph> <instance>`. Window resolution matches that name
-  anchored at the end of the title — the leading glyph is an animated spinner, and
-  an unanchored match would let `admin` match `admin-2`.
+- Window resolution no longer infers anything from window titles. The watchdog
+  records the handle of the window it creates — the handle that is both new since
+  a snapshot taken immediately before `wt.exe` launched and owned by the
+  `WindowsTerminal.exe` in the session's own ancestry — and writes it to
+  `<state>/session.json`. That record is the only source; there is deliberately no
+  fallback. Titles belong to Claude Code, and a session sitting at a trust prompt
+  or a `/login` screen has not applied `--name` yet, so it has no matching title at
+  all — which is exactly when an operator needs to attach. A fallback would also
+  hide a capture that quietly stopped working, right up until it resolved someone
+  else's window. The record is validated on every use against one invariant: it
+  must have been written for the session being acted on. Removed with the fallback:
+  the `--name` title match, the single-window short-circuit that made the
+  one-instance case right by luck, and the working-directory-leaf match.
+- Sessions are still launched with `--name <instance>`, so the window title reads
+  `<glyph> <instance>` rather than `Claude Code`. Nothing depends on it.
 
 ### Fixed
 
+- Targeting an elevated instance by name from an unelevated shell reported
+  `no greenroom session named '<instance>'` for a session that was running fine.
+  Selection matched on the discovered instance name, but an elevated session's
+  command line reads NULL across the integrity boundary, so it has no discoverable
+  name and never matched — which also left the code that knows how to escalate
+  sitting below an early exit, unreachable for exactly the instances it exists for.
+  `config.json` is readable at any integrity level, so its elevated flag is now
+  used to route instead.
+- `install.ps1` destroyed an instance's scheduled task before replacing it. An
+  unconditional `Unregister-ScheduledTask` preceded registration, which equals a
+  replace only when registration then succeeds; on any failure a working task was
+  already gone and the instance silently stopped starting at logon. Now replaced in
+  one step with `Register-ScheduledTask -Force`, so a refusal changes nothing.
+- Window operations were reported as successful without being checked.
+  `ShowWindow` returns the window's *previous* visibility rather than success, and
+  `GetLastError` is stale on success, so neither can report failure. Measured on
+  the reference host: `ShowWindow(SW_HIDE)` against an elevated window returned
+  `false` with `GetLastWin32Error 5` and the window did not move — no exception, no
+  prompt. Attach and detach now confirm by observing `IsWindowVisible` before and
+  after.
 - Re-running `install.ps1` without `-WorkingDirectory` silently relocated an
   installed instance to `~/<instance>`, creating a new working directory, seeding
   trust for it and restarting the session there — abandoning the real directory
