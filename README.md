@@ -70,11 +70,14 @@ full admin token and no UAC prompt. **Requires an elevated installer** — regis
 It is off by default because it changes how the instance is operated, not as a
 security posture:
 
-- **`attach` and `detach` then require an elevated shell as well.** UIPI stops a
-  normal shell from showing or hiding an elevated window, and the underlying calls
-  fail by returning `false` rather than erroring. `greenroom` checks first and
-  refuses with an explanation rather than reporting a success that did not happen.
-  `greenroom list` still works unelevated and marks which instances are elevated.
+- **`attach` and `detach` prompt for elevation.** UIPI stops a normal shell from
+  showing or hiding an elevated window, and the calls fail by returning `false`
+  rather than erroring — so `greenroom` re-launches itself through UAC and the
+  elevated copy does the work. Pass `-NoElevate` to get a plain refusal instead.
+- **An elevated session cannot be identified without elevation.**
+  `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is
+  how instances are named. `greenroom list` reports such a process as `(opaque)`
+  rather than pretending nothing is running.
 - **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
   `greenroom list` is how you tell.
 

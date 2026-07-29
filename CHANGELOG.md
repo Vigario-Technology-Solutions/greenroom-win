@@ -30,13 +30,23 @@ Notable changes between released versions. Format follows
   instance half-built, with files copied and trust seeded but nothing registered
   to run them.
 
-  One behaviour is documented as **unverified** rather than assumed: whether
-  `Win32_Process.CommandLine` is readable for a higher-integrity process of the
-  same user. If it is not, `greenroom list` under-reports elevated sessions from an
-  ordinary shell, so a hint is printed whenever an elevated instance is installed
-  and discovery finds nothing. The watchdog is unaffected — `RunLevel Highest`
-  applies to the whole `wscript` → watchdog → `wt` → `claude` chain, so an elevated
-  instance's supervisor is itself elevated and always sees its own session.
+  `attach` and `detach` on an elevated instance **re-launch `greenroom.ps1` through
+  UAC** rather than refusing, so the window still moves. A prompt is acceptable
+  there because the command was typed interactively — the opposite of the logon
+  path, where a UAC dialog behind a hidden window would be an invisible hang, which
+  is why the session takes its token from the task trigger. `-NoElevate` restores a
+  plain refusal for scripted callers.
+
+  Session discovery no longer discards processes it cannot identify.
+  **`Win32_Process.CommandLine` is NULL for any process the querying shell lacks
+  query rights on** — measured against `ctfmon.exe`, `TabTip.exe` and
+  `Bitwarden.exe`, which enumerate normally but expose no command line. An elevated
+  `claude.exe` is therefore visible but unidentifiable, and the old filter dropped
+  it, reporting "no session running" for a session that was running. Such processes
+  are now surfaced as `(opaque)` with a note that elevation is needed to name them.
+  The watchdog is unaffected — `RunLevel Highest` covers the whole `wscript` →
+  watchdog → `wt` → `claude` chain, so an elevated instance's supervisor is itself
+  elevated and always sees its own session.
 
 ### Changed
 

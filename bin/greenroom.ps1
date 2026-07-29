@@ -40,7 +40,13 @@ param(
     [string]$Action = 'status',
 
     [Parameter(Position = 1)]
-    [string]$Instance
+    [string]$Instance,
+
+    # Do not auto-escalate when the target instance runs elevated. Without this,
+    # attach/detach on an elevated instance re-launch this script through UAC so the
+    # window actually moves. Scripted callers that must not block on a prompt pass
+    # this and get a refusal (exit 4) instead.
+    [switch]$NoElevate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -118,35 +124,74 @@ function Show-ElevatedVisibilityHint {
 # An unelevated shell cannot show, hide or foreground a window owned by an elevated
 # process: UIPI blocks the calls across integrity levels, and ShowWindow reports
 # failure by returning false rather than raising. Acting anyway would print
-# "attached" and do nothing -- a silent failure behind a hidden window, which is
-# the one outcome this project refuses to produce. So check first and say why.
+# "attached" and do nothing.
+#
+# Refusing would be safe but useless -- the operator still wants the window. So
+# re-launch THIS script elevated and let the elevated copy do the work. A UAC
+# prompt is entirely acceptable here, because this is an interactive command the
+# user just typed. That is the opposite of the logon path, where a UAC dialog
+# behind a hidden window would be an invisible hang -- which is why the session
+# gets its token from the task trigger instead.
+#
+# -NoElevate opts out and restores the refusal, for scripted callers that must not
+# block on a prompt.
+function Invoke-ElevatedSelf {
+    param([string]$Name)
+
+    Write-Host "'$Name' runs elevated; this shell does not. Re-launching elevated..." -ForegroundColor Cyan
+    $argList = @('-NoProfile', '-File', $PSCommandPath, $Action)
+    if ($Name) { $argList += $Name }
+    try {
+        $p = Start-Process pwsh -Verb RunAs -ArgumentList $argList -PassThru -Wait -ErrorAction Stop
+        exit $p.ExitCode
+    } catch {
+        # The usual cause is the UAC prompt being dismissed, which is a decision,
+        # not a fault -- report it plainly rather than as a stack trace.
+        Write-Host "elevation declined or failed -- '$Name' was not changed." -ForegroundColor Yellow
+        Write-Host "  to do it by hand:  Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-Command','greenroom $Action $Name'"
+        exit 4
+    }
+}
+
 function Assert-CanActOnInstance {
     param([string]$Name)
     if (-not (Test-InstanceElevated -Name $Name)) { return }
     if (Test-SelfElevated) { return }
 
-    Write-Host "'$Name' runs ELEVATED, and this shell does not." -ForegroundColor Yellow
-    Write-Host '  UIPI blocks ShowWindow/SetForegroundWindow from a lower integrity level, so' -ForegroundColor Yellow
-    Write-Host '  attach and detach would report success and do nothing at all.' -ForegroundColor Yellow
-    Write-Host ''
-    Write-Host '  Re-run from an elevated shell:' -ForegroundColor Yellow
-    Write-Host "    Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-Command','greenroom $Action $Name'"
-    Write-Host ''
-    Write-Host '  Or drop elevation for this instance:' -ForegroundColor Yellow
-    Write-Host "    .\install.ps1 -Instance $Name -Elevated:`$false"
-    exit 4
+    if ($NoElevate) {
+        Write-Host "'$Name' runs ELEVATED, and this shell does not." -ForegroundColor Yellow
+        Write-Host '  UIPI blocks ShowWindow/SetForegroundWindow from a lower integrity level, so' -ForegroundColor Yellow
+        Write-Host '  attach and detach would report success and do nothing at all.' -ForegroundColor Yellow
+        Write-Host '  -NoElevate was passed, so this is not being escalated automatically.' -ForegroundColor Yellow
+        exit 4
+    }
+    Invoke-ElevatedSelf -Name $Name
 }
 
 function Get-AllSessions {
     # Anchor on claude.exe itself. Excluding the current process matters: a shell
     # running this script has "--remote-control" in its own command line.
-    $procs = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
-             Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '--remote-control' }
+    $all = @(Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
+             Where-Object { $_.ProcessId -ne $PID })
 
-    foreach ($p in $procs) {
+    foreach ($p in ($all | Where-Object { $_.CommandLine -match '--remote-control' })) {
         $name = '(unnamed)'
         if ($p.CommandLine -match '--remote-control\s+"?([^"\s-][^"\s]*)') { $name = $Matches[1] }
-        [PSCustomObject]@{ Instance = $name; Claude = $p; Pid = $p.ProcessId }
+        [PSCustomObject]@{ Instance = $name; Claude = $p; Pid = $p.ProcessId; Opaque = $false }
+    }
+
+    # MEASURED on the reference host: Win32_Process.CommandLine comes back NULL for
+    # any process this shell lacks query rights on -- confirmed against ctfmon.exe,
+    # TabTip.exe and Bitwarden.exe, all of which enumerate but expose no command
+    # line. A higher-integrity claude.exe falls in exactly that class.
+    #
+    # So an elevated session is VISIBLE as a process but UNIDENTIFIABLE: there is no
+    # --remote-control token to match, and the plain filter above drops it silently.
+    # Dropping it would report "no session running" for a session that is running,
+    # which is the wrong-diagnosis trap this project keeps having to design against.
+    # Surface it as opaque instead and let the caller say so.
+    foreach ($p in ($all | Where-Object { -not $_.CommandLine })) {
+        [PSCustomObject]@{ Instance = '(opaque)'; Claude = $p; Pid = $p.ProcessId; Opaque = $true }
     }
 }
 
@@ -255,7 +300,7 @@ if ($Action -eq 'list') {
         exit 1
     }
     $sessions | ForEach-Object {
-        $th = Get-TerminalHost $_.Claude
+        $th = if ($_.Opaque) { $null } else { Get-TerminalHost $_.Claude }
         $vis = $null; $hnd = $null
         if ($th) {
             $hnd = Resolve-SessionWindow -HostPid $th.ProcessId -Name $_.Instance -Quiet
@@ -265,11 +310,19 @@ if ($Action -eq 'list') {
             Instance    = $_.Instance
             ClaudePid   = $_.Pid
             TerminalPid = if ($th) { $th.ProcessId } else { $null }
-            Window      = if ($hnd) { $hnd } else { 'unresolved' }
+            Window      = if ($hnd) { $hnd } elseif ($_.Opaque) { 'n/a' } else { 'unresolved' }
             Visible     = $vis
-            Elevated    = Test-InstanceElevated -Name $_.Instance
+            Elevated    = if ($_.Opaque) { 'probably' } else { Test-InstanceElevated -Name $_.Instance }
         }
     } | Format-Table -AutoSize
+
+    $opaque = @($sessions | Where-Object Opaque)
+    if ($opaque.Count -gt 0) {
+        Write-Host "note: $($opaque.Count) claude.exe process(es) expose no command line to this shell." -ForegroundColor DarkYellow
+        Write-Host '  That is what a higher-integrity process looks like from here -- almost' -ForegroundColor DarkYellow
+        Write-Host '  certainly an elevated session. Which instance it is cannot be read without' -ForegroundColor DarkYellow
+        Write-Host '  elevation, so re-run this from an elevated shell to identify it.' -ForegroundColor DarkYellow
+    }
 
     # Listing an elevated instance from an unelevated shell works -- enumerating and
     # reading window titles is permitted across integrity levels even though acting

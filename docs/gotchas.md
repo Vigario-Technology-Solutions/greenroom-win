@@ -141,38 +141,46 @@ invisible because the window is hidden; a call that reports success while doing
 nothing removes the last signal there was.
 
 **Fix:** `install.ps1` records `elevated` in `config.json`, and `greenroom.ps1`
-checks it *before* touching a window. If the instance is elevated and the shell is
-not, it refuses, explains why, and exits 4 — rather than performing a no-op and
-claiming otherwise.
+checks it *before* touching a window. When the instance is elevated and the shell
+is not, it **re-launches itself through UAC** and lets the elevated copy do the
+work, so `attach` still attaches.
 
-Enumeration is a different matter and is deliberately still allowed:
-`EnumWindows`, `GetClassName` and `GetWindowText` work fine across integrity
-levels, so `greenroom list` still reports elevated instances correctly and marks
-them. Only *acting* is blocked.
+A UAC prompt is fine here precisely because this is an interactive command someone
+just typed. That is the mirror image of the logon path, where a UAC dialog behind a
+hidden window would be an invisible hang — which is why the session takes its token
+from the task trigger instead of prompting. Same mechanism, opposite conclusion,
+decided by whether a human is already looking at the screen. `-NoElevate` restores
+the plain refusal for scripted callers that must not block.
 
-One thing about elevated instances remains **not** established, and is marked as
-such in the code rather than guessed at: whether `Win32_Process.CommandLine` is
-readable for a higher-integrity process of the same user.
+Window *enumeration* is unaffected: `EnumWindows`, `GetClassName` and
+`GetWindowText` work across integrity levels. Only acting is blocked.
 
-Discovery finds sessions by matching `--remote-control` on the command line. If
-that property comes back empty across integrity levels, a running elevated session
-is invisible and looks exactly like a stopped one.
+### Process discovery is affected, though, and that is the sharper edge
 
-**The watchdog is not affected.** `RunLevel Highest` applies to the whole chain —
-`wscript` → watchdog → `wt` → `claude` — so an elevated instance's supervisor is
-itself elevated and can always see its own session. There is no duplicate-session
-risk from this.
+**`Win32_Process.CommandLine` is NULL for any process the querying shell lacks
+query rights on.** Measured on the reference host against `ctfmon.exe`,
+`TabTip.exe` and `Bitwarden.exe` — all three enumerate normally and all three
+expose no command line to an ordinary shell.
 
-The exposure is limited to `greenroom.ps1` invoked from an ordinary shell, where
-`list` may under-report. It prints a hint whenever an elevated instance is
-installed and nothing was found, so the ambiguity is visible rather than silently
-resolved as "not running".
+An elevated `claude.exe` lands in exactly that class, which breaks the identifying
+assumption everything here rests on: sessions are found by matching
+`--remote-control <instance>` on the command line. With no command line there is no
+token to match, so an elevated session is **visible as a process but
+unidentifiable**, and a naive filter drops it — reporting "no session running" for
+one that is running.
 
-There is no UAC prompt at any point. The task trigger supplies the elevated token
-directly, which is the only reason this is viable for a session that starts hidden
-at logon — a UAC dialog behind a hidden window is an invisible hang. The flip side
-is that **nothing on screen distinguishes an elevated session from a normal one**,
-so `greenroom list` grew an `Elevated` column to make it legible.
+So discovery now collects those separately and reports them as `(opaque)` rather
+than discarding them. It cannot say *which* instance an opaque process is; it can
+say that something is there and that elevation is needed to name it. That is worth
+more than a confident wrong answer.
+
+The watchdog is unaffected — `RunLevel Highest` covers the whole `wscript` →
+watchdog → `wt` → `claude` chain, so an elevated instance's supervisor is itself
+elevated and always sees its own session.
+
+Nothing on screen distinguishes an elevated session from a normal one — the token
+comes from the task trigger, so there is no prompt and no badge. `greenroom list`
+grew an `Elevated` column to make it legible.
 
 ---
 
