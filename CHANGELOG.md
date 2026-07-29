@@ -24,7 +24,9 @@ Notable changes between released versions. Format follows
   so it can be. `-ClaudeExe` is inherited too, but only when it was explicitly
   chosen — an auto-detected path is re-resolved rather than pinned, so the WinGet
   shim keeps surviving upgrades. Pass `-ClaudeExe ''` to revoke a choice, mirroring
-  `-AdditionalDirectories @()`.
+  `-AdditionalDirectories @()`. A `config.json` that exists but cannot be parsed is
+  now a hard error rather than being treated as absent — silently falling back to
+  defaults there would relocate the instance through the same route this fixes.
 
 - The launcher did not stop when its working directory was unreachable. Because
   `$ErrorActionPreference` is `Continue`, both the directory creation and the

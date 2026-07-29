@@ -74,17 +74,60 @@ $stateDir = Join-Path $env:USERPROFILE ".claude\greenroom\$Instance"
 # been resetting a deliberately staggered PT3M back to the PT1M default, which
 # quietly un-staggers a multi-instance host.
 $prevCfg = $null
-if (Test-Path (Join-Path $stateDir 'config.json')) {
-    try { $prevCfg = Get-Content (Join-Path $stateDir 'config.json') -Raw | ConvertFrom-Json } catch { }
+$prevCfgPath = Join-Path $stateDir 'config.json'
+$prevCfgUnreadable = $false
+if (Test-Path $prevCfgPath) {
+    try { $prevCfg = Get-Content $prevCfgPath -Raw | ConvertFrom-Json }
+    catch { $prevCfgUnreadable = $true }
+}
+
+# A config that EXISTS but cannot be parsed is not the same as no config at all,
+# and swallowing the difference reopens this very bug through another door: with
+# nothing to inherit, every omitted parameter falls back to its default and the
+# instance silently relocates to ~/<instance>, abandoning its project store.
+# Confirmed by corrupting a config and re-running: the working directory moved and
+# the only output was a warning about grants.
+#
+# ClaudeExe is deliberately not in this list. Omitting it falls back to
+# auto-detection, which is both safe and the normal case.
+if ($prevCfgUnreadable) {
+    $omitted = @('WorkingDirectory', 'TriggerDelay', 'AdditionalDirectories') |
+               Where-Object { -not $PSBoundParameters.ContainsKey($_) } |
+               ForEach-Object { "-$_" }
+    if ($omitted.Count -gt 0) {
+        throw @"
+'$prevCfgPath' exists but cannot be parsed, so this instance's remembered settings are unreadable.
+
+Refusing to continue. $($omitted -join ', ') were omitted, and with nothing to inherit they
+would fall back to defaults -- relocating the instance to '$(Join-Path $env:USERPROFILE $Instance)'
+and abandoning its project store, memory and transcripts.
+
+Either repair or delete that file, or pass every value explicitly on this run.
+"@
+    }
 }
 if (-not $PSBoundParameters.ContainsKey('WorkingDirectory') -and $prevCfg -and $prevCfg.workingDirectory) {
     $WorkingDirectory = $prevCfg.workingDirectory
     Say "  ..    keeping working directory from the previous install"
     Say "        $WorkingDirectory"
 }
-if (-not $PSBoundParameters.ContainsKey('TriggerDelay') -and $prevCfg -and $prevCfg.triggerDelay) {
-    $TriggerDelay = $prevCfg.triggerDelay
-    Say "  ..    keeping trigger delay from the previous install ($TriggerDelay)"
+if (-not $PSBoundParameters.ContainsKey('TriggerDelay')) {
+    if ($prevCfg -and $prevCfg.triggerDelay) {
+        $TriggerDelay = $prevCfg.triggerDelay
+        Say "  ..    keeping trigger delay from the previous install ($TriggerDelay)"
+    } else {
+        # config.json only started recording triggerDelay in this change, so an
+        # instance installed before it has nothing to inherit and would reset to
+        # the default on its first bare re-run -- silently un-staggering a
+        # multi-instance host. The registered task is the authoritative record of
+        # the delay actually in force, so read it back from there instead.
+        $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        $taskDelay = if ($existingTask -and $existingTask.Triggers) { $existingTask.Triggers[0].Delay } else { $null }
+        if ($taskDelay) {
+            $TriggerDelay = $taskDelay
+            Say "  ..    keeping trigger delay from the registered task ($TriggerDelay)"
+        }
+    }
 }
 # -ClaudeExe is the same class, but only when it was CHOSEN. config.json records
 # the RESOLVED path, so inheriting it unconditionally would pin whatever
@@ -347,10 +390,9 @@ if ($onPath) {
 # Omitting the parameter therefore inherits whatever the previous install
 # recorded. Passing it explicitly stays authoritative, so -AdditionalDirectories @()
 # remains the way to actually clear grants.
-$prevCfgPath = Join-Path $stateDir 'config.json'
-if (-not $PSBoundParameters.ContainsKey('AdditionalDirectories') -and (Test-Path $prevCfgPath)) {
+if (-not $PSBoundParameters.ContainsKey('AdditionalDirectories') -and $prevCfg) {
     try {
-        $prevGrants = @((Get-Content $prevCfgPath -Raw | ConvertFrom-Json).additionalDirectories) |
+        $prevGrants = @($prevCfg.additionalDirectories) |
                       Where-Object { $_ }
         if ($prevGrants.Count -gt 0) {
             $AdditionalDirectories = $prevGrants
