@@ -288,6 +288,32 @@ if ($onPath) {
     Warn 'add it to your user PATH, or invoke by full path.'
 }
 
+# NOT PASSING -AdditionalDirectories is different from passing it empty.
+#
+# This installer is documented as idempotent and safe to re-run at any time, so
+# following that advice must not destroy configuration. It did: a bare re-run
+# rebuilt $grants as empty and wrote that through to config.json, to the project
+# settings file, AND to the launch line, silently revoking access the instance had
+# been granted. Reproduced on the reference host -- one bare re-run took
+# 'C:\Users\tyler' out of all three places and the running session lost home
+# access with nothing but "grants : none" in the output to say so.
+#
+# Omitting the parameter therefore inherits whatever the previous install
+# recorded. Passing it explicitly stays authoritative, so -AdditionalDirectories @()
+# remains the way to actually clear grants.
+$prevCfgPath = Join-Path $stateDir 'config.json'
+if (-not $PSBoundParameters.ContainsKey('AdditionalDirectories') -and (Test-Path $prevCfgPath)) {
+    try {
+        $prevGrants = @((Get-Content $prevCfgPath -Raw | ConvertFrom-Json).additionalDirectories) |
+                      Where-Object { $_ }
+        if ($prevGrants.Count -gt 0) {
+            $AdditionalDirectories = $prevGrants
+            Say "  ..    inheriting $($prevGrants.Count) grant(s) from the previous install"
+            Say "        pass -AdditionalDirectories @() to clear them instead"
+        }
+    } catch { Warn "could not read previous grants from $prevCfgPath -- continuing with none" }
+}
+
 $grants = @()
 foreach ($d in $AdditionalDirectories) {
     if (-not (Test-Path $d)) { throw "-AdditionalDirectories: '$d' does not exist. Refusing to grant a path that isn't there." }
@@ -507,10 +533,49 @@ if (-not $NoTrustSeed) {
         Warn 'trust seed did NOT survive -- something rewrote ~/.claude.json. Re-seeding.'
         Set-ProjectTrust -Dir $WorkingDirectory
         if (Test-TrustSurvived -Dir $WorkingDirectory) {
-            Warn 'trust re-seeded. Restarting the task so the session picks it up.'
-            Stop-ScheduledTask  -TaskName $TaskName -ErrorAction SilentlyContinue
+            Warn 'trust re-seeded. Restarting the session so it picks the seed up.'
+
+            # Stop-ScheduledTask is a NO-OP against this architecture. The task
+            # runs wscript.exe, which spawns the watchdog detached and returns, so
+            # the task reaches Ready almost immediately and there is nothing left
+            # for Stop to stop. Start-ScheduledTask on its own therefore ADDS a
+            # second watchdog rather than replacing one -- and two watchdogs see
+            # the same session die on the same 1s poll and both relaunch it,
+            # producing two Windows Terminal windows for one instance. That is the
+            # ambiguity greenroom.ps1 refuses to guess at, so attach breaks
+            # permanently. The supervisor has to be stopped by process.
+            #
+            # The $_.ProcessId -ne $PID clause is load-bearing: this shell's own
+            # command line contains the search string and will match itself.
+            Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.ProcessId -ne $PID -and
+                    $_.CommandLine -match 'greenroom-watchdog\.ps1' -and
+                    $_.CommandLine -match ('-Instance\s+"?' + [regex]::Escape($Instance) + '("|\s|$)')
+                } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 2
+
+            # The session itself must go too: trust is read at startup, so a
+            # session already sitting on the dialog will not pick up the reseed.
+            Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -match $pattern } |
+                ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 3
+
             Start-ScheduledTask -TaskName $TaskName
-            Start-Sleep -Seconds 5
+
+            # Re-resolve the PID. The one captured before the restart is dead, and
+            # reporting it as "session up" would be a claim this script has not
+            # checked -- the exact failure the rest of this file exists to avoid.
+            $rsDeadline = (Get-Date).AddSeconds(45)
+            $found = $null
+            while ((Get-Date) -lt $rsDeadline) {
+                Start-Sleep -Milliseconds 750
+                $found = Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue |
+                         Where-Object { $_.CommandLine -match $pattern } | Select-Object -First 1
+                if ($found) { break }
+            }
+            if (-not $found) { Warn 'session did not come back within 45s after the re-seed restart.' }
         } else {
             Warn 'RE-SEED FAILED. Expect a modal trust dialog inside the hidden window.'
             Warn 'attach and accept it manually, or close other claude.exe processes and re-run.'
