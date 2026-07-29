@@ -393,25 +393,53 @@ if (-not $hwnd -or $hwnd -eq [IntPtr]::Zero) {
 
 $visible = [Greenroom.Win1]::IsWindowVisible($hwnd)
 
+# Act, then CONFIRM by observation. ShowWindow's return value cannot be used for
+# this, and neither can GetLastError -- measured on the reference host 2026-07-29,
+# both directions returned false:
+#
+#   unelevated -> elevated window : returned false, error 5, window did NOT move
+#   elevated   -> normal  window : returned false, error 1461, window DID move
+#
+# The return value is documented as the window's PREVIOUS visibility, not success,
+# so it is false for any window that was hidden -- which is every attach. The only
+# trustworthy signal is whether IsWindowVisible actually changed.
+#
+# Everything about a hidden session is invisible by construction, so reporting
+# "attached" without checking is how a no-op gets mistaken for success.
+function Set-WindowVisible {
+    param([IntPtr]$Handle, [bool]$Show, [string]$Name, [int]$ClaudePid)
+
+    $before = [Greenroom.Win1]::IsWindowVisible($Handle)
+    [Greenroom.Win1]::ShowWindow($Handle, $(if ($Show) { $SW_RESTORE } else { $SW_HIDE })) | Out-Null
+    if ($Show) { [Greenroom.Win1]::SetForegroundWindow($Handle) | Out-Null }
+    Start-Sleep -Milliseconds 250
+    $after = [Greenroom.Win1]::IsWindowVisible($Handle)
+
+    if ($after -eq $Show) {
+        if ($Show) { Write-Host "attached '$Name' -- window shown (claude pid $ClaudePid)" -ForegroundColor Green }
+        else       { Write-Host "detached '$Name' -- window hidden, session still running (claude pid $ClaudePid)" -ForegroundColor Green }
+        return $true
+    }
+
+    Write-Host "FAILED to $(if ($Show) {'show'} else {'hide'}) '$Name' -- the window did not change." -ForegroundColor Red
+    Write-Host "  visible before=$before after=$after (wanted $Show)" -ForegroundColor Red
+    Write-Host '  The session is unaffected; only the window operation failed.' -ForegroundColor Red
+    if (-not (Test-SelfElevated)) {
+        Write-Host '  Most likely cause: the window belongs to a higher-integrity process and' -ForegroundColor Red
+        Write-Host '  UIPI refused the call. Re-run from an elevated shell.' -ForegroundColor Red
+    }
+    return $false
+}
+
 switch ($Action) {
     'attach' {
-        [Greenroom.Win1]::ShowWindow($hwnd, $SW_RESTORE) | Out-Null
-        [Greenroom.Win1]::SetForegroundWindow($hwnd) | Out-Null
-        Write-Host "attached '$($s.Instance)' -- window shown (claude pid $($s.Pid))" -ForegroundColor Green
+        if (-not (Set-WindowVisible -Handle $hwnd -Show $true -Name $s.Instance -ClaudePid $s.Pid)) { exit 5 }
     }
     'detach' {
-        [Greenroom.Win1]::ShowWindow($hwnd, $SW_HIDE) | Out-Null
-        Write-Host "detached '$($s.Instance)' -- window hidden, session still running (claude pid $($s.Pid))" -ForegroundColor Green
+        if (-not (Set-WindowVisible -Handle $hwnd -Show $false -Name $s.Instance -ClaudePid $s.Pid)) { exit 5 }
     }
     'toggle' {
-        if ($visible) {
-            [Greenroom.Win1]::ShowWindow($hwnd, $SW_HIDE) | Out-Null
-            Write-Host "detached '$($s.Instance)'" -ForegroundColor Green
-        } else {
-            [Greenroom.Win1]::ShowWindow($hwnd, $SW_RESTORE) | Out-Null
-            [Greenroom.Win1]::SetForegroundWindow($hwnd) | Out-Null
-            Write-Host "attached '$($s.Instance)'" -ForegroundColor Green
-        }
+        if (-not (Set-WindowVisible -Handle $hwnd -Show (-not $visible) -Name $s.Instance -ClaudePid $s.Pid)) { exit 5 }
     }
     'status' {
         [PSCustomObject]@{

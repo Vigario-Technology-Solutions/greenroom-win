@@ -141,8 +141,37 @@ GetLastWin32Error   : 5      (ERROR_ACCESS_DENIED)
 window visible      : True before, True after -- nothing moved
 ```
 
-No exception, no prompt, no warning. The script would have printed `attached` and
-the window would have stayed hidden.
+No exception, no prompt, no warning.
+
+### `ShowWindow`'s return value does not mean what it looks like
+
+Measuring the *other* direction in the same run produced the correction that
+matters. An **elevated** shell calling `SW_RESTORE` on a normal greenroom window:
+
+```
+ShowWindow returned : False
+GetLastWin32Error   : 1461
+window visible      : False before, True after -- it WORKED
+```
+
+**Both directions returned `false`.** One was refused, one succeeded. The return
+value is not a success flag at all — it is documented as the window's *previous
+visibility*, so it is `false` for any window that was hidden, which is every single
+`attach`. `GetLastError` is no better: it carries a real `ERROR_ACCESS_DENIED` on
+the refused call and stale garbage on the successful one.
+
+So there is **no way to detect this failure from the call itself.** The only
+trustworthy signal is comparing `IsWindowVisible` before and after.
+
+That makes both defences necessary rather than belt-and-braces:
+
+- `greenroom.ps1` checks `config.json` *before* acting, so an unelevated shell
+  escalates rather than walking into a refusal it cannot detect;
+- and every show/hide **verifies by observation afterwards** and reports failure
+  loudly. It previously piped `ShowWindow` to `Out-Null` and printed `attached`
+  unconditionally — meaning any no-op, from any cause, read as success. That bug
+  predates elevation and would have misreported a stale-window case just as
+  happily.
 
 The same probe confirmed the reads that still work, which is what keeps `list`
 useful from an ordinary shell:
