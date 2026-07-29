@@ -58,6 +58,34 @@ Code keys on a working directory keys on the exact string, so the same class of
 mismatch — slash direction, drive-letter casing — reappears wherever a path is used
 as an identifier.
 
+**The concrete consequence: relocating an instance orphans its memory.** Claude
+Code stores per-project state under `~/.claude/projects/<slug>/`, where the slug is
+the literal working-directory string with every non-alphanumeric character replaced
+by a dash. Change the working directory and the slug changes with it, so the
+instance starts against an empty store — no memory, and nothing for `-c` to
+continue.
+
+```
+~/desktop-admin       ->  C--Users-tyler-desktop-admin
+~/src/desktop-admin   ->  C--Users-tyler-src-desktop-admin
+```
+
+**Carrying that state is the operator's job, not greenroom's.** Relocating takes a
+deliberate `-WorkingDirectory` on an already-installed instance; it cannot happen by
+accident. Provision it the same way you would any other move:
+
+```powershell
+Copy-Item -Path (Join-Path $old '*') -Destination $new -Recurse -Force
+```
+
+greenroom deliberately does not do this. `~/.claude/projects/` is Claude Code's data
+model, not greenroom's — the contents change between versions, a target slug may
+already hold state, and there is no obviously correct merge policy. greenroom writes
+only what a session needs in order to start at all (trust, its own state) and warns
+about everything else; see the marketplace check, which prints exactly what to remove
+from `settings.json` rather than editing it. An instance with an empty memory store
+starts fine. It is degraded, not broken, which puts it below that bar.
+
 ## 5. Windows Terminal hosts multiple windows in ONE process
 
 On a host running two instances, both sessions walk up to the *same*
