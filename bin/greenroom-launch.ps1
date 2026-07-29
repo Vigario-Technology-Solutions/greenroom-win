@@ -38,10 +38,53 @@ $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 # never connects and the trust prompt repeats forever. Claude Code also keys
 # project state on the literal cwd string, which is why this is set explicitly
 # rather than inherited from the task or the shell.
+# Failing to reach it must be FATAL, not something to shrug off.
+#
+# $ErrorActionPreference is 'Continue' for this whole script, so before this both
+# the New-Item and the Set-Location could fail, print to a stream nobody reads,
+# and let execution carry on. claude then launched in whatever directory the
+# process inherited -- which is the task's working directory, $env:USERPROFILE.
+# The home directory. The one place Remote Control provably will not connect
+# from, and the exact condition the comment above warns about.
+#
+# Reproduced with an unreachable path:
+#     New-Item:     Cannot find drive. A drive with the name 'Z' does not exist.
+#     Set-Location: Cannot find drive. A drive with the name 'Z' does not exist.
+#     cwd after   : C:\Users\tyler
+#
+# That is reachable for real: a working directory on a network share is not
+# guaranteed to be mapped when the logon task fires. The session would come up,
+# look alive to the watchdog, and never connect -- silently, in a hidden window.
+#
+# Exiting non-zero instead means the watchdog logs that the session did not come
+# up and eventually trips its crash-loop backoff. Noisy in the log beats wrong on
+# disk.
 $rcDir = $cfg.workingDirectory
-if (-not (Test-Path $rcDir)) { New-Item -ItemType Directory -Path $rcDir -Force | Out-Null }
-Set-Location -LiteralPath $rcDir
-Log "cwd = $((Get-Location).Path)"
+if (-not (Test-Path -LiteralPath $rcDir)) {
+    try {
+        New-Item -ItemType Directory -Path $rcDir -Force -ErrorAction Stop | Out-Null
+        Log "created working directory $rcDir"
+    } catch {
+        Log "FATAL: working directory '$rcDir' does not exist and cannot be created: $_"
+        Log '       if it lives on a network share, the drive was probably not mapped yet.'
+        exit 1
+    }
+}
+try { Set-Location -LiteralPath $rcDir -ErrorAction Stop }
+catch {
+    Log "FATAL: cannot enter working directory '$rcDir': $_"
+    exit 1
+}
+
+# Belt as well as braces: confirm we actually landed there rather than trusting
+# that Set-Location reported success. Running in the wrong directory is the
+# failure this whole block exists to prevent.
+$landed = (Get-Location).Path
+if ($landed.TrimEnd([char]92) -ne $rcDir.TrimEnd([char]92)) {
+    Log "FATAL: expected cwd '$rcDir' but landed in '$landed'"
+    exit 1
+}
+Log "cwd = $landed"
 
 try {
     [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
