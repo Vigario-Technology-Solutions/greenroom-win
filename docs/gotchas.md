@@ -131,10 +131,33 @@ is the last step — failing there would leave the instance half-built, with fil
 copied and trust seeded but nothing registered to run it.
 
 User Interface Privilege Isolation stops a lower-integrity process from driving a
-higher-integrity window. `ShowWindow` and `SetForegroundWindow` against an elevated
-session's window from a normal shell do not raise, do not prompt, and do not warn:
-they **return `false` and change nothing**. The script would print `attached` and
-the window would stay hidden.
+higher-integrity window. **Measured on the reference host 2026-07-29**, not taken
+from documentation — an unelevated shell calling `ShowWindow(SW_HIDE)` on a window
+owned by an elevated process:
+
+```
+ShowWindow returned : False
+GetLastWin32Error   : 5      (ERROR_ACCESS_DENIED)
+window visible      : True before, True after -- nothing moved
+```
+
+No exception, no prompt, no warning. The script would have printed `attached` and
+the window would have stayed hidden.
+
+The same probe confirmed the reads that still work, which is what keeps `list`
+useful from an ordinary shell:
+
+| From an unelevated shell, against an elevated process | Result |
+|---|---|
+| process enumerates in `Win32_Process` | yes |
+| `Win32_Process.CommandLine` | **NULL** |
+| `GetWindowText` / `EnumWindows` on its window | **works** |
+| `ShowWindow` on its window | **false, error 5** |
+
+And the asymmetry in the other direction: from an elevated shell, `ctfmon.exe`,
+`TabTip.exe` and `Bitwarden.exe` — all opaque to a normal shell — read back their
+command lines normally, and `Register-ScheduledTask -RunLevel Highest` succeeds
+where it returns `Access is denied` unelevated.
 
 That is the worst possible shape for this project. Everything here is already
 invisible because the window is hidden; a call that reports success while doing

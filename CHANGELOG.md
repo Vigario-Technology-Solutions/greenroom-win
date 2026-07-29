@@ -16,8 +16,9 @@ Notable changes between released versions. Format follows
 
   Elevation breaks attach and detach, which is the reason it needs deliberate
   opt-in rather than being a convenience. UIPI stops an unelevated shell from
-  driving an elevated window, and `ShowWindow`/`SetForegroundWindow` fail by
-  returning `false` — no error, no prompt. `greenroom.ps1` therefore reads the new
+  driving an elevated window: measured on the reference host, `ShowWindow(SW_HIDE)`
+  against an elevated window **returned `false` with `GetLastWin32Error` 5
+  (`ERROR_ACCESS_DENIED`) and the window did not move** — no exception, no prompt. `greenroom.ps1` therefore reads the new
   `elevated` field from `config.json` and refuses *before* acting, exiting 4 with
   the elevated re-run command, rather than printing `attached` over a window that
   never moved. `greenroom list` still works unelevated — enumeration is permitted

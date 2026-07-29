@@ -127,9 +127,10 @@ function Show-ElevatedVisibilityHint {
 }
 
 # An unelevated shell cannot show, hide or foreground a window owned by an elevated
-# process: UIPI blocks the calls across integrity levels, and ShowWindow reports
-# failure by returning false rather than raising. Acting anyway would print
-# "attached" and do nothing.
+# process. MEASURED on the reference host 2026-07-29 rather than taken from the
+# documentation: ShowWindow(SW_HIDE) against an elevated window returned false with
+# GetLastWin32Error 5 (ERROR_ACCESS_DENIED) and the window did not move. No
+# exception, no prompt. Acting anyway would print "attached" and do nothing.
 #
 # Refusing would be safe but useless -- the operator still wants the window. So
 # re-launch THIS script elevated and let the elevated copy do the work. A UAC
