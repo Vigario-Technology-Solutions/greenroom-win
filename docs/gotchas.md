@@ -1,6 +1,6 @@
 # Why it is built this way
 
-Five Windows behaviours defeated more obvious designs. Each one is the reason for a
+Six Windows behaviours defeated more obvious designs. Each one is the reason for a
 specific piece of the architecture, and each cost real debugging time that is
 invisible in the finished code.
 
@@ -93,29 +93,180 @@ On a host running two instances, both sessions walk up to the *same*
 Taking the first one is a coin flip on every attach and detach — this is the normal
 two-instance case, not an edge case.
 
-**Fix:** launch the session with `--name <instance>`. Claude Code renders the
-window title as `<glyph> <name>`, so the title becomes something greenroom
-controls and can match on.
+There is no supported way to ask Windows Terminal which window hosts a given
+process. That was requested as [microsoft/terminal#5694][t5694] and closed
+**Won't Fix**, so this is a permanent property of WT, not a version bug.
 
-Match the name **anchored at the end**. Two independent reasons:
+[t5694]: https://github.com/microsoft/terminal/issues/5694
 
-- the leading glyph is an animated spinner and changes while the session works
-  (observed as `✳` idle and `⠂` busy), so the front of the string is not stable;
-- an unanchored substring lets `admin` match `admin-2`, which leaves the shorter
-  instance permanently unresolvable — the same collision the watchdog's
-  command-line pattern already guards against.
+**Fix — record the handle at creation.** The watchdog is the only component that
+knows which window is which, because it is the one that made it:
+it snapshots every `CASCADIA_HOSTING` handle immediately before launching
+`wt.exe`, then takes the handle that is both *new since that snapshot* and
+*owned by the `WindowsTerminal.exe` in the session's own ancestry*. Two
+independent filters, so a window opened by an unrelated `wt` at the same moment
+fails one of them. Exactly one survivor is written to
+`~/.claude/greenroom/<instance>/session.json`; any other count records nothing
+and says so in the log rather than guessing.
 
-When it still does not resolve uniquely, print the candidates and refuse. Acting
-on the wrong window hides or reveals the wrong session, which is worse than doing
-nothing.
+That record is the **only** source. There is deliberately no fallback.
 
-> **Earlier versions of this document claimed Claude Code titles the window with
-> the working directory's leaf name. That was wrong.** Without `--name` the title
-> is `Claude Code` until the conversation acquires an auto-generated title, and
-> then it is *that* — it changes as the conversation changes and is never tied to
-> the directory. Matching the leaf therefore found nothing against a live session,
-> and the failure was masked because resolution short-circuits whenever the host
-> process owns only one window.
+The obvious alternative is to match on the window title, since the session is
+launched with `--name <instance>` and Claude Code renders the title as
+`<glyph> <name>`. Don't. The title belongs to Claude Code, not to greenroom, and
+a session sitting at a trust prompt or a `/login` screen has not applied `--name`
+yet — so it has no matching title at all, which is exactly when the operator needs
+to attach. A title fallback also hides the failure that actually matters: capture
+silently not working looks perfectly healthy right up until the day it resolves
+someone else's window. One source makes a capture failure loud on the first
+attach, and `greenroom restart <instance>` fixes it in one step.
+
+The stored handle is **validated on every use, never trusted**, against a single
+invariant: the record must have been written for the session being acted on. Both
+PIDs in the record are checked against the live session the caller already
+resolved, so a record left by any earlier session fails regardless of what it
+contains. The handle is then re-enumerated rather than used directly, because
+Windows reuses handles after a window closes and a stale number can name a live
+window belonging to something else. Any mismatch refuses and names the reason —
+acting on the wrong window hides or reveals the wrong session, which is worse
+than doing nothing.
+
+`--name` is still passed, because a window titled `✳ laptop-admin` is easier to
+read than `Claude Code`. Nothing depends on it.
+
+> **Earlier revisions of this document prescribed title matching as the fix, and
+> before that claimed Claude Code titles the window with the working directory's
+> leaf name.** The leaf claim was simply wrong: without `--name` the title is
+> `Claude Code` until the conversation acquires an auto-generated title, and then
+> it is *that*, which changes as the conversation does and is never tied to the
+> directory. The failure was masked because resolution short-circuited whenever
+> the host process owned only one window — the single-instance case, where the
+> answer is right by luck.
+
+## 6. An elevated session cannot be attached from an unelevated shell
+
+Elevation is opt-in per instance (`install.ps1 -Elevated`), and it is off by
+default — but the reason is operational, not a security posture. **Elevation breaks
+attach and detach**, in the silent way, and that is a behaviour change the operator
+has to know about rather than inherit.
+
+Registering the task at all requires an elevated installer: `RunLevel Highest`
+returns `Access is denied` from a normal shell. Measured, not assumed. The
+installer therefore checks up front rather than at `Register-ScheduledTask`, which
+is the last step — failing there would leave the instance half-built, with files
+copied and trust seeded but nothing registered to run it.
+
+User Interface Privilege Isolation stops a lower-integrity process from driving a
+higher-integrity window. **Measured on the reference host 2026-07-29**, not taken
+from documentation — an unelevated shell calling `ShowWindow(SW_HIDE)` on a window
+owned by an elevated process:
+
+```
+ShowWindow returned : False
+GetLastWin32Error   : 5      (ERROR_ACCESS_DENIED)
+window visible      : True before, True after -- nothing moved
+```
+
+No exception, no prompt, no warning.
+
+### `ShowWindow`'s return value does not mean what it looks like
+
+Measuring the *other* direction in the same run produced the correction that
+matters. An **elevated** shell calling `SW_RESTORE` on a normal greenroom window:
+
+```
+ShowWindow returned : False
+GetLastWin32Error   : 1461
+window visible      : False before, True after -- it WORKED
+```
+
+**Both directions returned `false`.** One was refused, one succeeded. The return
+value is not a success flag at all — it is documented as the window's *previous
+visibility*, so it is `false` for any window that was hidden, which is every single
+`attach`. `GetLastError` is no better: it carries a real `ERROR_ACCESS_DENIED` on
+the refused call and stale garbage on the successful one.
+
+So there is **no way to detect this failure from the call itself.** The only
+trustworthy signal is comparing `IsWindowVisible` before and after.
+
+That makes both defences necessary rather than belt-and-braces:
+
+- `greenroom.ps1` checks `config.json` *before* acting, so an unelevated shell
+  escalates rather than walking into a refusal it cannot detect;
+- and every show/hide **verifies by observation afterwards** and reports failure
+  loudly. It previously piped `ShowWindow` to `Out-Null` and printed `attached`
+  unconditionally — meaning any no-op, from any cause, read as success. That bug
+  predates elevation and would have misreported a stale-window case just as
+  happily.
+
+The same probe confirmed the reads that still work, which is what keeps `list`
+useful from an ordinary shell:
+
+| From an unelevated shell, against an elevated process | Result |
+|---|---|
+| process enumerates in `Win32_Process` | yes |
+| `Win32_Process.CommandLine` | **NULL** |
+| `GetWindowText` / `EnumWindows` on its window | **works** |
+| `ShowWindow` on its window | **false, error 5** |
+
+And the asymmetry in the other direction: from an elevated shell, `ctfmon.exe`,
+`TabTip.exe` and `Bitwarden.exe` — all opaque to a normal shell — read back their
+command lines normally, and `Register-ScheduledTask -RunLevel Highest` succeeds
+where it returns `Access is denied` unelevated.
+
+That is the worst possible shape for this project. Everything here is already
+invisible because the window is hidden; a call that reports success while doing
+nothing removes the last signal there was.
+
+**Fix:** `install.ps1` records `elevated` in `config.json`, and `greenroom.ps1`
+checks it *before* touching a window. When the instance is elevated and the shell
+is not, it **re-launches itself through UAC** and lets the elevated copy do the
+work, so `attach` still attaches.
+
+A UAC prompt is fine here precisely because this is an interactive command someone
+just typed. That is the mirror image of the logon path, where a UAC dialog behind a
+hidden window would be an invisible hang — which is why the session takes its token
+from the task trigger instead of prompting. Same mechanism, opposite conclusion,
+decided by whether a human is already looking at the screen. `-NoElevate` restores
+the plain refusal for scripted callers that must not block.
+
+Window *enumeration* is unaffected: `EnumWindows`, `GetClassName` and
+`GetWindowText` work across integrity levels. Only acting is blocked.
+
+### Process discovery is affected, and it depends on where you run from
+
+**`Win32_Process.CommandLine` is NULL for any process the querying shell lacks
+query rights on.** Measured on the reference host against `ctfmon.exe`,
+`TabTip.exe` and `Bitwarden.exe` — all three enumerate normally and all three
+expose no command line to an ordinary shell.
+
+An elevated `claude.exe` lands in exactly that class, which breaks the identifying
+assumption everything here rests on: sessions are found by matching
+`--remote-control <instance>` on the command line. With no command line there is no
+token to match, so an elevated session is **visible as a process but
+unidentifiable**, and a naive filter drops it — reporting "no session running" for
+one that is running.
+
+**This is a property of the shell, not of the session.** Run `greenroom list` from
+an elevated prompt and there is nothing unreadable: every instance resolves by name
+exactly as usual. The blind spot belongs to the observer, and the fix for it is to
+change vantage point, not configuration. The output says so rather than describing
+the sessions as though they were permanently unknowable.
+
+Unreadable processes are therefore reported as `(unreadable)` rather than
+discarded — but **only when an elevated instance is actually configured**. An
+unreadable `claude.exe` is not evidence of greenroom by itself: a host with Claude
+Desktop installed runs a dozen unrelated ones (13 on the reference host), and
+labelling one of those a probable greenroom session would be precisely the
+confident wrong answer this branch exists to avoid.
+
+The watchdog is unaffected — `RunLevel Highest` covers the whole `wscript` →
+watchdog → `wt` → `claude` chain, so an elevated instance's supervisor is itself
+elevated and always sees its own session.
+
+Nothing on screen distinguishes an elevated session from a normal one — the token
+comes from the task trigger, so there is no prompt and no badge. `greenroom list`
+grew an `Elevated` column to make it legible.
 
 ---
 

@@ -33,6 +33,12 @@ param(
     # Default is none, on purpose: an instance boots with access to its working
     # directory and nothing else unless you grant more here.
     [string[]]$AdditionalDirectories = @(),
+    # Run the session elevated (task RunLevel Highest). Off by default because it
+    # CHANGES HOW THE INSTANCE IS OPERATED, not because admin is inherently alarming:
+    # an elevated session cannot be attached or detached from an unelevated shell,
+    # since UIPI blocks the window calls and they fail silently. See docs/gotchas.md
+    # section 6. Requires an elevated installer. -Elevated:$false revokes.
+    [switch]$Elevated,
     [switch]$NoTrustSeed,
     [switch]$NoStart
 )
@@ -110,6 +116,41 @@ if (-not $PSBoundParameters.ContainsKey('WorkingDirectory') -and $prevCfg -and $
     $WorkingDirectory = $prevCfg.workingDirectory
     Say "  ..    keeping working directory from the previous install"
     Say "        $WorkingDirectory"
+}
+
+# Elevation is resolved HERE, before anything is copied, seeded or registered.
+#
+# It inherits on a bare re-run for the same reason the working directory and grants
+# do: this installer is documented as idempotent, and a re-run that silently
+# dropped elevation would leave an instance that still looks installed but fails
+# later with Access Denied inside a hidden window. Unlike the others it announces
+# itself every time, because it is security-relevant. -Elevated:$false revokes.
+$elevatedExplicit = $PSBoundParameters.ContainsKey('Elevated')
+if (-not $elevatedExplicit -and $prevCfg -and $prevCfg.elevated) {
+    $Elevated = $true
+    Say "  ..    keeping ELEVATED from the previous install"
+    Say "        pass -Elevated:`$false to drop it"
+}
+
+# MEASURED on the reference host 2026-07-29, not assumed: registering a task with
+# RunLevel Highest from a non-elevated shell fails with 'Access is denied'.
+#
+# Checked up front rather than at Register-ScheduledTask, which is the last step.
+# Failing there would leave the instance half-built -- files copied, trust seeded,
+# config written -- with no task to run any of it.
+if ($Elevated -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw @"
+-Elevated requires an elevated installer.
+
+Registering a scheduled task with RunLevel Highest fails with 'Access is denied'
+from a non-elevated shell. Verified on the reference host.
+
+Re-run elevated:
+  Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-File','$PSCommandPath','-Instance','$Instance','-Elevated'
+
+Nothing has been changed.
+"@
 }
 if (-not $PSBoundParameters.ContainsKey('TriggerDelay')) {
     if ($prevCfg -and $prevCfg.triggerDelay) {
@@ -461,6 +502,10 @@ foreach ($d in $AdditionalDirectories) {
     workingDirectory      = $WorkingDirectory
     triggerDelay          = $TriggerDelay
     additionalDirectories = $grants
+    # Read by greenroom.ps1 to decide whether it can act on this instance's window
+    # at all. It is recorded here rather than re-derived from the registered task
+    # because greenroom.ps1 must know BEFORE it tries and silently fails.
+    elevated              = [bool]$Elevated
     wt                    = $wt
     pwsh                  = $pwsh
     installedUtc          = (Get-Date).ToUniversalTime().ToString('o')
@@ -613,9 +658,19 @@ $trigger.Delay = $TriggerDelay
 
 # Interactive = runs in the logged-on desktop session, which is required: the
 # session hosts a real Windows Terminal window that you attach to on demand.
-# Limited = no elevation.
+#
+# RunLevel is Limited unless -Elevated was asked for. Highest runs the task with
+# the user's full admin token and, because the trigger is a scheduled task rather
+# than an interactive launch, produces NO UAC prompt -- which is the only reason
+# this works at all for a session that starts hidden at logon. A UAC dialog behind
+# a hidden window is an invisible hang, the exact failure class this project
+# exists to avoid.
+#
+# That silence cuts both ways: nothing on screen distinguishes an elevated session
+# from an unelevated one. greenroom.ps1 reads config.json to tell them apart.
+$runLevel = if ($Elevated) { 'Highest' } else { 'Limited' }
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
-    -LogonType Interactive -RunLevel Limited
+    -LogonType Interactive -RunLevel $runLevel
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
@@ -627,14 +682,38 @@ $settings = New-ScheduledTaskSettingsSet `
 $settings.Hidden = $false
 
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Say "  ..    removed pre-existing task '$TaskName'"
+    Say "  ..    replacing pre-existing task '$TaskName'"
 }
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Principal $principal -Settings $settings `
-    -Description "Always-on greenroom session '$Instance' in $WorkingDirectory. Started hidden at logon; attach with greenroom.ps1." | Out-Null
+$desc = "Always-on greenroom session '$Instance' in $WorkingDirectory. Started hidden at logon; attach with greenroom.ps1."
+if ($Elevated) { $desc += ' RUNS ELEVATED.' }
+
+try {
+    # -Force replaces an existing task in one step. Unregistering first and then
+    # registering is the same thing only when registration succeeds: if it is
+    # refused -- which -Elevated can be, from an unelevated installer -- the
+    # pre-emptive unregister has already destroyed a working task, so the
+    # instance stops starting at logon and the error below ("Nothing was
+    # changed") is a lie. Replace in place so a refusal changes nothing.
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings -Description $desc -Force | Out-Null
+} catch {
+    # No access-denied special case here. -Elevated from an unelevated installer is
+    # already refused up front, so this cannot be that; and telling an operator who
+    # IS elevated to re-run elevated would be wrong advice. Whatever else failed,
+    # -Force means the previous task is still in place, so report and stop.
+    throw
+}
 Ok "task             : $TaskName (delay $TriggerDelay)"
+
+if ($Elevated) {
+    Ok "elevation        : RunLevel Highest -- session runs with a full admin token"
+    Write-Host '                     attach/detach now need an elevated shell too; UIPI blocks' -ForegroundColor DarkGray
+    Write-Host '                     the window calls from a lower integrity level (gotchas #6).' -ForegroundColor DarkGray
+    Write-Host '                     There is no UAC prompt and nothing on screen marks the' -ForegroundColor DarkGray
+    Write-Host "                     session as elevated -- 'greenroom list' is how you tell." -ForegroundColor DarkGray
+    Write-Host "                     Revoke with: .\install.ps1 -Instance $Instance -Elevated:`$false" -ForegroundColor DarkGray
+}
 
 # ----------------------------------------------------------------- start/verify
 

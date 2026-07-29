@@ -133,7 +133,76 @@ public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 '@
+}
+
+# Every CASCADIA_HOSTING window currently on the desktop, as a set of handle values.
+function Get-CascadiaHandleSet {
+    $script:capHits = @()
+    $cb = [GreenroomWd.Win1+EnumWindowsProc] {
+        param($h, $l)
+        $sb = New-Object System.Text.StringBuilder 256
+        [GreenroomWd.Win1]::GetClassName($h, $sb, 256) | Out-Null
+        if ($sb.ToString() -match 'CASCADIA_HOSTING') { $script:capHits += [int64]$h }
+        return $true
+    }
+    [GreenroomWd.Win1]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+    return , @($script:capHits)
+}
+
+# Record which window belongs to this session, so attach never has to guess.
+#
+# Windows Terminal hosts every window in ONE process, and Microsoft declined to
+# expose any mapping from a hosted process to its window (microsoft/terminal#5694,
+# closed Won't-Fix). GetWindowThreadProcessId therefore returns the same pid for
+# every window WT owns, and the only thing that differs between them is the title
+# -- which the hosted application owns and rewrites. A session sitting at a trust
+# dialog or a login prompt never applies --name at all, so title matching fails
+# exactly when attaching matters most.
+#
+# The handle is knowable at creation instead. Two independent filters are applied
+# so a concurrent start cannot be misattributed:
+#   1. the handle must be NEW since immediately before wt.exe was launched
+#   2. it must belong to the WindowsTerminal process in this session's ancestry
+# Exactly one handle satisfying both is recorded; anything else records nothing and
+# leaves the title fallback in place rather than storing a guess.
+function Save-SessionWindow {
+    param([int]$ClaudePid, [int64[]]$Before)
+
+    $wtPid = $null
+    $cur = Get-CimInstance Win32_Process -Filter "ProcessId=$ClaudePid" -ErrorAction SilentlyContinue
+    for ($i = 0; $i -lt 6 -and $cur; $i++) {
+        $par = Get-CimInstance Win32_Process -Filter "ProcessId=$($cur.ParentProcessId)" -ErrorAction SilentlyContinue
+        if (-not $par) { break }
+        if ($par.Name -eq 'WindowsTerminal.exe') { $wtPid = [int]$par.ProcessId; break }
+        $cur = $par
+    }
+    if (-not $wtPid) { Log 'window capture: no WindowsTerminal in ancestry -- leaving title fallback'; return }
+
+    $now = Get-CascadiaHandleSet
+    $new = @($now | Where-Object { $Before -notcontains $_ })
+
+    $owned = @($new | Where-Object {
+        $wp = 0
+        [GreenroomWd.Win1]::GetWindowThreadProcessId([IntPtr]$_, [ref]$wp) | Out-Null
+        [int]$wp -eq $wtPid
+    })
+
+    if ($owned.Count -ne 1) {
+        Log "window capture: $($owned.Count) candidate windows (new=$($new.Count), wt pid $wtPid) -- leaving title fallback"
+        return
+    }
+
+    $state = @{
+        handle       = $owned[0]
+        claudePid    = $ClaudePid
+        terminalPid  = $wtPid
+        capturedUtc  = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $path = Join-Path $stateDir 'session.json'
+    $state | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
+    Log "window capture: handle $($owned[0]) on WindowsTerminal pid $wtPid"
 }
 
 $titlePattern = [regex]::Escape($Instance) + '$'
@@ -165,6 +234,11 @@ function Close-StaleWindows {
 
 function Start-RcSession {
     Close-StaleWindows
+    # Snapshot the desktop's console windows immediately before launching, so the
+    # one this call creates can be identified by difference rather than by title.
+    # Deliberately taken AFTER Close-StaleWindows, or a corpse still being torn
+    # down could appear as "new" in the comparison.
+    $script:windowsBefore = Get-CascadiaHandleSet
     # -w new forces its own window instead of a tab in an existing terminal.
     $args_ = @('-w', 'new', $pwsh, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                '-File', $inner, '-Instance', $Instance)
@@ -205,7 +279,15 @@ while ($true) {
                 while ((Get-Date) -lt $deadline) {
                     Start-Sleep -Milliseconds 500
                     $found = Get-RcClaudePid
-                    if ($found) { $sessionPid = $found; Log "session up, claude pid $found"; break }
+                    if ($found) {
+                        $sessionPid = $found; Log "session up, claude pid $found"
+                        # Capture now, while it is unambiguous which window was
+                        # just created. Best-effort: a failure here costs the
+                        # deterministic path, not the session.
+                        try { Save-SessionWindow -ClaudePid $found -Before $script:windowsBefore }
+                        catch { Log "window capture failed: $_" }
+                        break
+                    }
                 }
                 if (-not $found) { Log 'session did NOT come up within 45s'; $sessionPid = $null }
 

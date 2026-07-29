@@ -55,10 +55,41 @@ With a directory grant:
 | `-AdditionalDirectories` | per-instance grants, **default none** |
 | `-TriggerDelay` | logon delay, default `PT1M` |
 | `-ClaudeExe` | override CLI detection |
+| `-Elevated` | run the session as admin, **default off** — see below |
 | `-NoTrustSeed`, `-NoStart` | skip those steps |
 
 Idempotent — re-run any time. It will not kill a running session; new config
 applies at the next restart.
+
+### Elevated instances
+
+`-Elevated` registers the task with `RunLevel Highest`, so the session runs with a
+full admin token and no UAC prompt. **Requires an elevated installer** — registering
+`RunLevel Highest` is refused from a normal shell.
+
+It is off by default because it changes how the instance is operated, not as a
+security posture:
+
+- **`attach` and `detach` prompt for elevation.** UIPI stops a normal shell from
+  showing or hiding an elevated window, and the calls fail by returning `false`
+  rather than erroring — so `greenroom` re-launches itself through UAC and the
+  elevated copy does the work. Pass `-NoElevate` to get a plain refusal instead.
+- **`greenroom list` has a blind spot unless it is run elevated too.**
+  `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is
+  how instances are named — so from an ordinary shell an elevated session shows as
+  `(unreadable)` rather than by name. Run `list` elevated and the blind spot is
+  gone; it belongs to the shell, not the session.
+- **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
+  `greenroom list` is how you tell.
+
+Elevation is inherited on a bare re-run, like grants and the working directory, and
+says so each time. Revoke it explicitly:
+
+```powershell
+.\install.ps1 -Instance desktop-admin -Elevated:$false
+```
+
+Background: [docs/gotchas.md §6](docs/gotchas.md).
 
 **Before you install**, read [docs/provisioning.md](docs/provisioning.md). Two
 prerequisites fail *silently* if unmet — a CLI without `--remote-control`, and
@@ -190,7 +221,7 @@ Do not trust a green line from the installer for anything it cannot observe.
 | TUI renders as boxes | Launched under conhost. Check `wt` in `config.json` |
 | Trust dialog on first start | The seed was dropped by another Claude process. Installer re-seeds; if it reports RE-SEED FAILED, close other sessions and re-run |
 | `/rc active` missing | Not logged in, or logged in with a `setup-token` |
-| `attach` reports AMBIGUOUS | Two windows under one WT process with no unique title match — usually two working directories sharing a leaf name. Rename one |
+| `cannot resolve the window` | The instance has no usable window record — most often a session started before the record existed. `greenroom restart <instance>` creates one |
 | Wrong `claude.exe` picked | Pass `-ClaudeExe` |
 
 Restart one instance:
