@@ -93,9 +93,38 @@ On a host running two instances, both sessions walk up to the *same*
 Taking the first one is a coin flip on every attach and detach — this is the normal
 two-instance case, not an edge case.
 
-**Fix:** launch the session with `--name <instance>`. Claude Code renders the
+There is no supported way to ask Windows Terminal which window hosts a given
+process. That was requested as [microsoft/terminal#5694][t5694] and closed
+**Won't Fix**, so this is a permanent property of WT, not a version bug.
+
+[t5694]: https://github.com/microsoft/terminal/issues/5694
+
+**Fix, primary — record the handle at creation.** The watchdog is the only
+component that knows which window is which, because it is the one that made it:
+it snapshots every `CASCADIA_HOSTING` handle immediately before launching
+`wt.exe`, then takes the handle that is both *new since that snapshot* and
+*owned by the `WindowsTerminal.exe` in the session's own ancestry*. Two
+independent filters, so a window opened by an unrelated `wt` at the same moment
+fails one of them. Exactly one survivor is written to
+`~/.claude/greenroom/<instance>/session.json`; any other count records nothing
+and says so in the log rather than guessing.
+
+The stored handle is **validated on every use, never trusted**. Windows reuses
+handles after a window closes, so a stale record can name someone else's window.
+Before acting on it, greenroom requires that it is still a live `CASCADIA` window
+under *this* host process, that the recorded terminal PID matches, and that the
+recorded `claude.exe` PID is still alive. Any mismatch falls through to the title
+paths below instead of acting on a maybe.
+
+This matters most in the case the title cannot cover: a session stopped at a trust
+prompt or a `/login` screen has not applied `--name` yet, so it has no matching
+title at all — unresolvable exactly when attaching is the thing you need.
+
+**Fix, fallback — launch with `--name <instance>`.** Claude Code renders the
 window title as `<glyph> <name>`, so the title becomes something greenroom
-controls and can match on.
+controls. This still carries sessions started before the handle was recorded, and
+covers a record lost to a state-directory wipe. `greenroom restart <instance>`
+re-captures.
 
 Match the name **anchored at the end**. Two independent reasons:
 

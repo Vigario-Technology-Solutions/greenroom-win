@@ -252,7 +252,30 @@ function Resolve-SessionWindow {
     $wins = @(Get-CascadiaWindows -HostPid $HostPid)
     if ($wins.Count -eq 0) { return $null }
 
-    # PRIMARY. greenroom-launch.ps1 starts the session with `--name <instance>`,
+    # PRIMARY. The handle the watchdog recorded when it created the window, which
+    # is the only identification that does not depend on the hosted application.
+    # Titles are owned and rewritten by Claude Code, and a session stopped at a
+    # trust dialog or a login prompt never applies --name at all -- unresolvable
+    # precisely when attaching matters most. See greenroom-watchdog.ps1.
+    #
+    # Validated, never trusted: handles are reused after a window closes, so a
+    # stale record could name someone else's window. The recorded handle must
+    # still be a live CASCADIA window under THIS host process, and the session it
+    # was captured for must still be the running one. Any mismatch falls through
+    # to the title paths rather than acting on a maybe.
+    $sf = Join-Path $env:USERPROFILE ".claude\greenroom\$Name\session.json"
+    if (Test-Path $sf) {
+        try {
+            $rec = Get-Content $sf -Raw | ConvertFrom-Json
+            $match = @($wins | Where-Object { [int64]$_.Handle -eq [int64]$rec.handle })
+            if ($match.Count -eq 1 -and [int]$rec.terminalPid -eq [int]$HostPid) {
+                $live = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$rec.claudePid)" -ErrorAction SilentlyContinue
+                if ($live -and $live.Name -eq 'claude.exe') { return $match[0].Handle }
+            }
+        } catch { }   # unreadable or malformed record is simply not usable
+    }
+
+    # SECONDARY. greenroom-launch.ps1 starts the session with `--name <instance>`,
     # and Claude Code renders the window title as "<glyph> <name>". That title is
     # set by Claude Code itself, so nothing has to out-fight it, and it holds even
     # after the conversation acquires its own auto-generated name.
