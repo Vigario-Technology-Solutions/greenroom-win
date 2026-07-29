@@ -15,6 +15,14 @@ Notable changes between released versions. Format follows
 
 ### Fixed
 
+- Re-running `install.ps1` without `-WorkingDirectory` silently relocated an
+  installed instance to `~/<instance>`, creating a new working directory, seeding
+  trust for it and restarting the session there — abandoning the real directory
+  along with its project store, memory and transcripts. `-TriggerDelay` reset the
+  same way, un-staggering a multi-instance host. Both are now inherited from the
+  previous install when omitted, and `triggerDelay` is recorded in `config.json`
+  so it can be.
+
 - The launcher did not stop when its working directory was unreachable. Because
   `$ErrorActionPreference` is `Continue`, both the directory creation and the
   `Set-Location` could fail while execution carried on, and Claude Code then

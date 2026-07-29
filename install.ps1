@@ -53,10 +53,41 @@ if ($Instance -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$') {
     throw "invalid instance name '$Instance'. Use 1-32 chars: letters, digits, dot, dash, underscore; must start alphanumeric."
 }
 
-if (-not $WorkingDirectory) { $WorkingDirectory = Join-Path $env:USERPROFILE $Instance }
-
 $TaskName = "greenroom-$Instance"
 $stateDir = Join-Path $env:USERPROFILE ".claude\greenroom\$Instance"
+
+# Same trap as -AdditionalDirectories, and worse in consequence. A bare re-run of
+# an already-installed instance used to fall back to ~/<instance>, silently
+# RELOCATING it: a new working directory was created, trust was seeded for it, and
+# the session restarted there -- abandoning the real working directory along with
+# its project store, its memory and its transcripts. The only hint was an
+# "OK working dir" line reporting a path nobody asked for. The docs call this
+# installer idempotent and invite re-running it.
+#
+# Reproduced on the reference host: two instances configured at ~/src/desktop-admin
+# and ~/src/anikenrobinson both jumped to ~/desktop-admin and ~/ar-video-prod on a
+# bare re-run, each landing in a fresh, empty project store.
+#
+# So an omitted -WorkingDirectory now inherits the previous install's. Passing it
+# stays authoritative, which is how an instance is deliberately relocated.
+# -TriggerDelay gets the same treatment for the same reason: a bare re-run had
+# been resetting a deliberately staggered PT3M back to the PT1M default, which
+# quietly un-staggers a multi-instance host.
+$prevCfg = $null
+if (Test-Path (Join-Path $stateDir 'config.json')) {
+    try { $prevCfg = Get-Content (Join-Path $stateDir 'config.json') -Raw | ConvertFrom-Json } catch { }
+}
+if (-not $PSBoundParameters.ContainsKey('WorkingDirectory') -and $prevCfg -and $prevCfg.workingDirectory) {
+    $WorkingDirectory = $prevCfg.workingDirectory
+    Say "  ..    keeping working directory from the previous install"
+    Say "        $WorkingDirectory"
+}
+if (-not $PSBoundParameters.ContainsKey('TriggerDelay') -and $prevCfg -and $prevCfg.triggerDelay) {
+    $TriggerDelay = $prevCfg.triggerDelay
+    Say "  ..    keeping trigger delay from the previous install ($TriggerDelay)"
+}
+
+if (-not $WorkingDirectory) { $WorkingDirectory = Join-Path $env:USERPROFILE $Instance }
 
 Say ''
 Say "=== installing greenroom instance '$Instance' ==="
@@ -324,6 +355,7 @@ foreach ($d in $AdditionalDirectories) {
     instance              = $Instance
     claudeExe             = $claude
     workingDirectory      = $WorkingDirectory
+    triggerDelay          = $TriggerDelay
     additionalDirectories = $grants
     wt                    = $wt
     pwsh                  = $pwsh
