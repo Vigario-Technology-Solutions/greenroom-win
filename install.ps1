@@ -139,8 +139,20 @@ if (-not $PSBoundParameters.ContainsKey('TriggerDelay')) {
 # So the explicit choice is what gets remembered, not the result. Someone who
 # passed -ClaudeExe did so because auto-detection picks wrong on their host, which
 # is exactly the case where silently reverting to it on a bare re-run does damage.
+#
+# The flag is tracked in a variable rather than re-derived from $PSBoundParameters
+# when config.json is written. Inheriting sets $ClaudeExe but does NOT add it to
+# $PSBoundParameters, so deriving it at write time recorded 'false' on the very
+# run that had just inherited -- the choice then survived exactly one bare re-run
+# and silently reverted to auto-detection on the next.
+#
+# -WorkingDirectory and -TriggerDelay do not have this problem because they
+# persist the VALUE, which carries forward on its own. This one persists a flag
+# ABOUT the value, so the flag has to carry forward too.
+$claudeExeExplicit = ($PSBoundParameters.ContainsKey('ClaudeExe') -and [bool]$ClaudeExe)
 if (-not $PSBoundParameters.ContainsKey('ClaudeExe') -and $prevCfg -and $prevCfg.claudeExeExplicit -and $prevCfg.claudeExe) {
     $ClaudeExe = $prevCfg.claudeExe
+    $claudeExeExplicit = $true
     Say "  ..    keeping explicitly chosen claude.exe from the previous install"
     Say "        $ClaudeExe"
 }
@@ -411,10 +423,10 @@ foreach ($d in $AdditionalDirectories) {
 [PSCustomObject]@{
     instance              = $Instance
     claudeExe             = $claude
-    # Passing -ClaudeExe '' is how an explicit choice is revoked, mirroring
-    # -AdditionalDirectories @() for grants: the parameter was supplied, but it
-    # names nothing, so auto-detection resumes and nothing gets pinned.
-    claudeExeExplicit     = ($PSBoundParameters.ContainsKey('ClaudeExe') -and [bool]$ClaudeExe)
+    # True when chosen on this run OR inherited from a previous choice. Passing
+    # -ClaudeExe '' revokes it, mirroring -AdditionalDirectories @() for grants:
+    # the parameter was supplied but names nothing, so auto-detection resumes.
+    claudeExeExplicit     = $claudeExeExplicit
     workingDirectory      = $WorkingDirectory
     triggerDelay          = $TriggerDelay
     additionalDirectories = $grants
