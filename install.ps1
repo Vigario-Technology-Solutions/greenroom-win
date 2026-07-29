@@ -53,10 +53,142 @@ if ($Instance -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$') {
     throw "invalid instance name '$Instance'. Use 1-32 chars: letters, digits, dot, dash, underscore; must start alphanumeric."
 }
 
-if (-not $WorkingDirectory) { $WorkingDirectory = Join-Path $env:USERPROFILE $Instance }
-
 $TaskName = "greenroom-$Instance"
 $stateDir = Join-Path $env:USERPROFILE ".claude\greenroom\$Instance"
+
+# Same trap as -AdditionalDirectories, and worse in consequence. A bare re-run of
+# an already-installed instance used to fall back to ~/<instance>, silently
+# RELOCATING it: a new working directory was created, trust was seeded for it, and
+# the session restarted there -- abandoning the real working directory along with
+# its project store, its memory and its transcripts. The only hint was an
+# "OK working dir" line reporting a path nobody asked for. The docs call this
+# installer idempotent and invite re-running it.
+#
+# Reproduced on the reference host: two instances configured at ~/src/desktop-admin
+# and ~/src/anikenrobinson both jumped to ~/desktop-admin and ~/ar-video-prod on a
+# bare re-run, each landing in a fresh, empty project store.
+#
+# So an omitted -WorkingDirectory now inherits the previous install's. Passing it
+# stays authoritative, which is how an instance is deliberately relocated.
+# -TriggerDelay gets the same treatment for the same reason: a bare re-run had
+# been resetting a deliberately staggered PT3M back to the PT1M default, which
+# quietly un-staggers a multi-instance host.
+$prevCfg = $null
+$prevCfgPath = Join-Path $stateDir 'config.json'
+$prevCfgUnreadable = $false
+if (Test-Path $prevCfgPath) {
+    try { $prevCfg = Get-Content $prevCfgPath -Raw | ConvertFrom-Json }
+    catch { $prevCfgUnreadable = $true }
+}
+
+# A config that EXISTS but cannot be parsed is not the same as no config at all,
+# and swallowing the difference reopens this very bug through another door: with
+# nothing to inherit, every omitted parameter falls back to its default and the
+# instance silently relocates to ~/<instance>, abandoning its project store.
+# Confirmed by corrupting a config and re-running: the working directory moved and
+# the only output was a warning about grants.
+#
+# ClaudeExe is deliberately not in this list. Omitting it falls back to
+# auto-detection, which is both safe and the normal case.
+if ($prevCfgUnreadable) {
+    $omitted = @('WorkingDirectory', 'TriggerDelay', 'AdditionalDirectories') |
+               Where-Object { -not $PSBoundParameters.ContainsKey($_) } |
+               ForEach-Object { "-$_" }
+    if ($omitted.Count -gt 0) {
+        throw @"
+'$prevCfgPath' exists but cannot be parsed, so this instance's remembered settings are unreadable.
+
+Refusing to continue. $($omitted -join ', ') were omitted, and with nothing to inherit they
+would fall back to defaults -- relocating the instance to '$(Join-Path $env:USERPROFILE $Instance)'
+and abandoning its project store, memory and transcripts.
+
+Either repair or delete that file, or pass every value explicitly on this run.
+"@
+    }
+}
+if (-not $PSBoundParameters.ContainsKey('WorkingDirectory') -and $prevCfg -and $prevCfg.workingDirectory) {
+    $WorkingDirectory = $prevCfg.workingDirectory
+    Say "  ..    keeping working directory from the previous install"
+    Say "        $WorkingDirectory"
+}
+if (-not $PSBoundParameters.ContainsKey('TriggerDelay')) {
+    if ($prevCfg -and $prevCfg.triggerDelay) {
+        $TriggerDelay = $prevCfg.triggerDelay
+        Say "  ..    keeping trigger delay from the previous install ($TriggerDelay)"
+    } else {
+        # config.json only started recording triggerDelay in this change, so an
+        # instance installed before it has nothing to inherit and would reset to
+        # the default on its first bare re-run -- silently un-staggering a
+        # multi-instance host. The registered task is the authoritative record of
+        # the delay actually in force, so read it back from there instead.
+        $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        $taskDelay = if ($existingTask -and $existingTask.Triggers) { $existingTask.Triggers[0].Delay } else { $null }
+        if ($taskDelay) {
+            $TriggerDelay = $taskDelay
+            Say "  ..    keeping trigger delay from the registered task ($TriggerDelay)"
+        }
+    }
+}
+# -ClaudeExe is the same class, but only when it was CHOSEN. config.json records
+# the RESOLVED path, so inheriting it unconditionally would pin whatever
+# auto-detection happened to pick and defeat the whole reason the WinGet Links
+# shim is preferred -- that path is package-ID-keyed and survives upgrades, and
+# freezing a resolved copy of it buys nothing while risking a stale pin if the CLI
+# is ever installed elsewhere.
+#
+# So the explicit choice is what gets remembered, not the result. Someone who
+# passed -ClaudeExe did so because auto-detection picks wrong on their host, which
+# is exactly the case where silently reverting to it on a bare re-run does damage.
+#
+# The flag is tracked in a variable rather than re-derived from $PSBoundParameters
+# when config.json is written. Inheriting sets $ClaudeExe but does NOT add it to
+# $PSBoundParameters, so deriving it at write time recorded 'false' on the very
+# run that had just inherited -- the choice then survived exactly one bare re-run
+# and silently reverted to auto-detection on the next.
+#
+# -WorkingDirectory and -TriggerDelay do not have this problem because they
+# persist the VALUE, which carries forward on its own. This one persists a flag
+# ABOUT the value, so the flag has to carry forward too.
+$claudeExeExplicit  = ($PSBoundParameters.ContainsKey('ClaudeExe') -and [bool]$ClaudeExe)
+$claudeExeInherited = $false
+if (-not $PSBoundParameters.ContainsKey('ClaudeExe') -and $prevCfg -and $prevCfg.claudeExeExplicit -and $prevCfg.claudeExe) {
+    $ClaudeExe = $prevCfg.claudeExe
+    $claudeExeExplicit  = $true
+    $claudeExeInherited = $true
+}
+
+# An explicit choice that does not exist must not be silently discarded. The
+# candidate list filters on Test-Path, so a missing path simply dropped out and
+# auto-detection took over -- while the line above had already claimed the choice
+# was being kept, and claudeExeExplicit then pinned the AUTO-DETECTED path as
+# though it were the choice. Reproduced by deleting a chosen binary and re-running:
+#
+#   ..  keeping explicitly chosen claude.exe ...\gr-vanish\claude.exe   <- claimed
+#   OK  claude code : ...\WinGet\Links\claude.exe                      <- used
+#   config: claudeExeExplicit = True on a path nobody chose
+#
+# -AdditionalDirectories already refuses a path that is not there; this is the
+# same treatment for the same reason.
+if ($claudeExeExplicit -and -not (Test-Path -LiteralPath $ClaudeExe)) {
+    $origin = if ($PSBoundParameters.ContainsKey('ClaudeExe')) { 'was passed on this run' }
+              else { "was inherited from the previous install of '$Instance'" }
+    throw @"
+-ClaudeExe '$ClaudeExe' does not exist. It $origin.
+
+Refusing to continue. Auto-detection would silently take over and be recorded as
+though it were the deliberate choice, leaving this instance on a binary nobody
+selected.
+
+Point -ClaudeExe at a binary that exists, or pass -ClaudeExe '' to revoke the
+choice and return to auto-detection.
+"@
+}
+if ($claudeExeInherited) {
+    Say "  ..    keeping explicitly chosen claude.exe from the previous install"
+    Say "        $ClaudeExe"
+}
+
+if (-not $WorkingDirectory) { $WorkingDirectory = Join-Path $env:USERPROFILE $Instance }
 
 Say ''
 Say "=== installing greenroom instance '$Instance' ==="
@@ -301,10 +433,9 @@ if ($onPath) {
 # Omitting the parameter therefore inherits whatever the previous install
 # recorded. Passing it explicitly stays authoritative, so -AdditionalDirectories @()
 # remains the way to actually clear grants.
-$prevCfgPath = Join-Path $stateDir 'config.json'
-if (-not $PSBoundParameters.ContainsKey('AdditionalDirectories') -and (Test-Path $prevCfgPath)) {
+if (-not $PSBoundParameters.ContainsKey('AdditionalDirectories') -and $prevCfg) {
     try {
-        $prevGrants = @((Get-Content $prevCfgPath -Raw | ConvertFrom-Json).additionalDirectories) |
+        $prevGrants = @($prevCfg.additionalDirectories) |
                       Where-Object { $_ }
         if ($prevGrants.Count -gt 0) {
             $AdditionalDirectories = $prevGrants
@@ -323,7 +454,12 @@ foreach ($d in $AdditionalDirectories) {
 [PSCustomObject]@{
     instance              = $Instance
     claudeExe             = $claude
+    # True when chosen on this run OR inherited from a previous choice. Passing
+    # -ClaudeExe '' revokes it, mirroring -AdditionalDirectories @() for grants:
+    # the parameter was supplied but names nothing, so auto-detection resumes.
+    claudeExeExplicit     = $claudeExeExplicit
     workingDirectory      = $WorkingDirectory
+    triggerDelay          = $TriggerDelay
     additionalDirectories = $grants
     wt                    = $wt
     pwsh                  = $pwsh

@@ -15,6 +15,21 @@ Notable changes between released versions. Format follows
 
 ### Fixed
 
+- Re-running `install.ps1` without `-WorkingDirectory` silently relocated an
+  installed instance to `~/<instance>`, creating a new working directory, seeding
+  trust for it and restarting the session there — abandoning the real directory
+  along with its project store, memory and transcripts. `-TriggerDelay` reset the
+  same way, un-staggering a multi-instance host. Both are now inherited from the
+  previous install when omitted, and `triggerDelay` is recorded in `config.json`
+  so it can be. `-ClaudeExe` is inherited too, but only when it was explicitly
+  chosen — an auto-detected path is re-resolved rather than pinned, so the WinGet
+  shim keeps surviving upgrades. Pass `-ClaudeExe ''` to revoke a choice, mirroring
+  `-AdditionalDirectories @()`. An explicit or inherited `-ClaudeExe` that does not
+  exist is now refused rather than silently dropped — auto-detection used to take
+  over and be recorded as though it were the deliberate choice. A `config.json` that exists but cannot be parsed is
+  now a hard error rather than being treated as absent — silently falling back to
+  defaults there would relocate the instance through the same route this fixes.
+
 - The launcher did not stop when its working directory was unreachable. Because
   `$ErrorActionPreference` is `Continue`, both the directory creation and the
   `Set-Location` could fail while execution carried on, and Claude Code then
