@@ -290,7 +290,11 @@ function Test-ShellResolution {
     $settings = Join-Path $env:USERPROFILE '.claude\settings.json'
     $shell = $null
     if (Test-Path $settings) {
-        try { $shell = (Get-Content $settings -Raw | ConvertFrom-Json).defaultShell } catch { }
+        # A settings file that will not parse is not this installer's problem to
+        # report -- it means no bash requirement can be established, which is the
+        # same outcome as the key being absent. Stay $null and say so below.
+        try { $shell = (Get-Content $settings -Raw | ConvertFrom-Json).defaultShell }
+        catch { $shell = $null }
     }
     if ($shell -ne 'bash') {
         Ok "shell            : defaultShell=$(if ($shell) { $shell } else { '(unset)' }) -- no bash requirement"
