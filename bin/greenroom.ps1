@@ -129,11 +129,30 @@ function Resolve-SessionWindow {
 
     $wins = @(Get-CascadiaWindows -HostPid $HostPid)
     if ($wins.Count -eq 0) { return $null }
+
+    # PRIMARY. greenroom-launch.ps1 starts the session with `--name <instance>`,
+    # and Claude Code renders the window title as "<glyph> <name>". That title is
+    # set by Claude Code itself, so nothing has to out-fight it, and it holds even
+    # after the conversation acquires its own auto-generated name.
+    #
+    # Anchored at the END, deliberately, for two separate reasons:
+    #   - the leading glyph is an animated spinner and changes while the session
+    #     works (observed as both U+2733 idle and U+2802 busy), so the front of
+    #     the string is not stable to match on;
+    #   - an unanchored substring would let 'admin' match 'admin-2', leaving the
+    #     shorter instance permanently unresolvable. Same collision the watchdog's
+    #     command-line pattern already guards against.
+    $m = @($wins | Where-Object { $_.Title -match ([regex]::Escape($Name) + '$') })
+    if ($m.Count -eq 1) { return $m[0].Handle }
+
+    # Only one window under this host process, so there is nothing to confuse it
+    # with. This also covers sessions started before --name was passed.
     if ($wins.Count -eq 1) { return $wins[0].Handle }
 
-    # Several sessions under one Windows Terminal process. Claude Code titles the
-    # window with the working directory's leaf name (plus an animated spinner
-    # glyph), so match on substring, never equality.
+    # LEGACY FALLBACK. A session started by an older launcher carries Claude Code's
+    # own title instead. Note that title is NOT the working-directory leaf -- it is
+    # the conversation title, which changes as the conversation does -- so this
+    # match frequently finds nothing. Restart the instance to move it onto --name.
     $leaf = Get-InstanceWorkingDirLeaf -Name $Name
     if ($leaf) {
         $m = @($wins | Where-Object { $_.Title -like "*$leaf*" })
@@ -143,9 +162,10 @@ function Resolve-SessionWindow {
     if (-not $Quiet) {
         Write-Host "AMBIGUOUS: WindowsTerminal pid $HostPid owns $($wins.Count) console windows:" -ForegroundColor Yellow
         $wins | ForEach-Object { Write-Host "    handle=$($_.Handle)  title='$($_.Title)'" }
-        if ($leaf) { Write-Host "  no unique title match for working-directory leaf '$leaf'" -ForegroundColor Yellow }
-        else       { Write-Host "  no config.json for instance '$Name' to derive a working directory from" -ForegroundColor Yellow }
+        Write-Host "  no window whose title ends with the session name '$Name'" -ForegroundColor Yellow
         Write-Host '  refusing to guess -- acting on the wrong window would hide or reveal the wrong session.' -ForegroundColor Yellow
+        Write-Host "  if this instance predates --name, restart it to pick the title up:" -ForegroundColor Yellow
+        Write-Host "      Start-ScheduledTask -TaskName greenroom-$Name" -ForegroundColor Yellow
     }
     return $null
 }

@@ -55,6 +55,20 @@ Log "codepage = $([Console]::OutputEncoding.CodePage)"
 # instances on one host apart.
 $claudeArgs = @('--remote-control', $Instance)
 
+# --name sets the session's display name, and Claude Code renders the window title
+# as "<glyph> <name>". That is what makes a window identifiable at all.
+#
+# Windows Terminal hosts several windows in ONE process, so greenroom.ps1 can only
+# tell them apart by title. Without --name the title is Claude Code's own: it
+# starts as "Claude Code" and becomes the CONVERSATION title once the conversation
+# has one, changing as the conversation changes. Neither is tied to the instance,
+# which is why matching on the working-directory leaf finds nothing against a live
+# session.
+#
+# Measured on the reference host: --name drives the title, and it holds even when
+# resuming a conversation that already carries its own auto-generated title.
+$claudeArgs += @('--name', $Instance)
+
 # Directory grants are PER INSTANCE and default to none. An instance launches with
 # access to its working directory and nothing else unless the install granted more.
 if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
