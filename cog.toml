@@ -1,0 +1,21 @@
+# cocogitto -- commit convention linting.
+#
+# ONE TOOL, on purpose. The alternative shape was a linter plus a separate changelog
+# generator, and those two can disagree: a commit whose summary wraps onto a second line
+# is accepted by one and silently dropped by the other, so a change vanishes from the
+# release notes behind nothing but a warning. A tool that lints with the same parser it
+# generates from cannot disagree with itself, and that whole class of hole closes by
+# construction -- which is why this file exists before anything releases from it.
+#
+#   cog verify "<subject>"   lints one message   -- CI runs it on the pull request title
+#   cog check                lints history       -- CI runs it on pushes to main
+#
+# THIS FILE CARRIES ONLY WHAT LINTING NEEDS. Version bumping, changelog generation and
+# tagging bring `tag_prefix`, `branch_whitelist`, the bump hooks and the `[changelog]`
+# block with them, in the change that introduces the release path. Configuration arrives
+# with the thing that uses it, so a reader can tell what is live from what is aspirational.
+
+# `cog check` walks history. Merge commits are not authored to a convention and never
+# reach main here anyway -- the ruleset allows squash only -- so they are noise rather
+# than findings.
+ignore_merge_commits = true

@@ -56,8 +56,11 @@ exempts the owner and every automation acting on the owner's behalf, which is th
 entire population the rule exists to constrain. To push directly, set `enforcement`
 to `disabled` first — a deliberate, visible act.
 
-**`required_status_checks`** — five contexts, one per job in
-`.github/workflows/ci.yml`: `manifest`, `parse`, `json`, `analyze`, `test`. The
+**`required_status_checks`** — six contexts, one per job that must pass:
+`manifest`, `parse`, `json`, `analyze` and `test` from `.github/workflows/ci.yml`,
+and `pr-title` from `.github/workflows/commit-convention.yml`. A context is a job
+name, and jobs live wherever their trigger puts them — `pr-title` runs on events
+the gate does not, so it is a different workflow and still a required check. The
 list is meant to *be* the list of what must pass. A single aggregate job
 depending on the others would report one context in place of five, and what a
 reviewer sees would stop being what is enforced — and a job missing from its
@@ -80,8 +83,12 @@ date with `main` before merging turns every merge into a rebase-and-rerun for
 everyone behind it, which on a single-maintainer repository buys serialisation
 nobody asked for. `required_linear_history` already keeps the graph readable.
 
+`history`, in that same workflow, is deliberately **not** here. It runs on pushes,
+so it would never report on a pull request, and a required context that cannot
+report wedges the branch permanently.
+
 ## Applying it
 
-Apply this **after** all five have reported at least once on a pull request. A
+Apply this **after** all six have reported at least once on a pull request. A
 required context that has never run cannot be distinguished from one that is
 merely pending, so applying it first wedges the branch with no obvious cause.
