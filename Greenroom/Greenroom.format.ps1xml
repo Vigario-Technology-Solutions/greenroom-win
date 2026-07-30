@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Presentation for Greenroom.Instance.
+
+  This file is why Get-GreenroomInstance does not call Format-Table itself. A cmdlet
+  that formats its own output has already destroyed it: PowerShell's formatter emits
+  FormatStartData / GroupStartData records, so the next command in the pipeline
+  receives those instead of data. Declaring a view here means the table is what a
+  human sees at the prompt while the pipeline still carries objects.
+
+  Six properties would otherwise render as a list, because PowerShell switches from
+  table to list above four. Without this file the output would also look worse than
+  the script it replaces, not merely different.
+
+  (Note for anyone editing: an XML comment may not contain two consecutive hyphens,
+  which is how this file first failed to load.)
+
+  Opaque is deliberately omitted from the table. It explains why Instance reads
+  "(unreadable)" and is available on the object for anyone filtering on it.
+-->
+<Configuration>
+  <ViewDefinitions>
+    <View>
+      <Name>Greenroom.Instance</Name>
+      <ViewSelectedBy>
+        <TypeName>Greenroom.Instance</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader>
+            <Label>Instance</Label>
+            <Width>20</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>ClaudePid</Label>
+            <Width>10</Width>
+            <Alignment>Right</Alignment>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>TerminalPid</Label>
+            <Width>12</Width>
+            <Alignment>Right</Alignment>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Window</Label>
+            <Width>10</Width>
+            <Alignment>Right</Alignment>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Visible</Label>
+            <Width>8</Width>
+          </TableColumnHeader>
+          <TableColumnHeader>
+            <Label>Elevated</Label>
+            <Width>9</Width>
+          </TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Instance</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ClaudePid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>TerminalPid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Window</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Visible</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Elevated</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+  </ViewDefinitions>
+</Configuration>
