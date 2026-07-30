@@ -52,8 +52,8 @@ reviewer sees would stop being what is enforced — and a job missing from its
 `needs:` would leave this reading as complete while covering less, with nothing
 anywhere to report the gap.
 
-The cost is real: renaming a job here is a protection change, and forgetting
-makes it one leaves this file waiting on a context nothing will ever report,
+The cost is real: renaming a job here is a protection change, and forgetting to
+make it one leaves this file waiting on a context nothing will ever report,
 which is indistinguishable from one merely pending. That trade is taken because
 the two failures are not comparable — a wedged branch is loud, immediate, and
 fixed by whoever caused it, while silent under-coverage is a false belief held

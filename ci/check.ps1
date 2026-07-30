@@ -109,9 +109,21 @@ function Test-JsonFile {
     # a rewrite into flow style. The parse phase does not cover .yml, so this is the only
     # thing reading it -- if it ever stops matching, it reports zero jobs and every context
     # fails, which is the safe direction to be wrong in.
+    # Both files are required to exist, and their absence is a failure rather than a
+    # skip. Returning "passed" when one is missing would be a fail-OPEN path in a guard
+    # whose whole justification is failing closed: rename or delete either file and the
+    # check goes green while validating nothing, which is precisely the silent
+    # under-coverage the one-context-per-job decision exists to avoid. Neither file is
+    # optional in this repository -- protection lives in the tree, and the workflow is
+    # what satisfies it.
     $wf = '.github/workflows/ci.yml'
     $payload = '.github/rulesets/main.json'
-    if (-not (Test-Path $wf) -or -not (Test-Path $payload)) { Passed "json ($($files.Count) file(s))"; return }
+    $absent = @($wf, $payload | Where-Object { -not (Test-Path $_) })
+    if ($absent.Count) {
+        $absent | ForEach-Object { Write-Host "   missing, so required contexts cannot be checked: $_" -ForegroundColor Red }
+        Failed 'json (cannot verify required contexts)'
+        return
+    }
 
     $jobs = @()
     $inJobs = $false
