@@ -44,8 +44,23 @@ exempts the owner and every automation acting on the owner's behalf, which is th
 entire population the rule exists to constrain. To push directly, set `enforcement`
 to `disabled` first — a deliberate, visible act.
 
-## Not included
+**`required_status_checks: ci`** — the context is the `ci` job in
+`.github/workflows/ci.yml`, matched by job name. The name is tautological on
+purpose: renaming a job silently disables this rule rather than failing loudly,
+because a context nothing reports is a check that never arrives and the branch
+waits on it forever. A constant means adding or splitting jobs later never
+touches protection — where a fan-out is wanted, the extra jobs get real names
+and one aggregate `ci` job with `needs:` stays the only required context. Should
+it have to change anyway: relax the rule first, merge, tighten again, then verify
+against a live pull request.
 
-`required_status_checks` is absent because this repository has no CI. Adding a
-required check whose job never reports wedges the branch permanently, so the rule
-only goes in alongside the workflow that satisfies it.
+`strict_required_status_checks_policy` is `false`. Requiring a branch to be up to
+date with `main` before merging turns every merge into a rebase-and-rerun for
+everyone behind it, which on a single-maintainer repository buys serialisation
+nobody asked for. `required_linear_history` already keeps the graph readable.
+
+## Applying it
+
+Apply this **after** `ci` has reported at least once on a pull request. A
+required context that has never run cannot be distinguished from one that is
+merely pending, so applying it first wedges the branch with no obvious cause.
