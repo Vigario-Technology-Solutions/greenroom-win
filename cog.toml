@@ -36,9 +36,16 @@ pre_bump_hooks = [
 # Pushing the branch and the tag are separate refs and separate pushes. The tag is
 # what a release is; the branch push is what carries the changelog and the bumped
 # manifest back to main.
+# `v{{version}}`, NOT `{{version}}`. Measured: with tag_prefix = "v" the tag created is
+# `v0.2.0`, but `{{version}}` expands inside a hook to the BARE `0.2.0`. Pushing that
+# pushes nothing -- the tag stays local and the release exists only on the runner.
+#
+# Note the inconsistency, because it is a trap: `cog bump --dry-run` prints the PREFIXED
+# `v0.2.0`, while the hook template gives the bare version. Both were measured rather
+# than inferred from each other.
 post_bump_hooks = [
     'git push origin main',
-    'git push origin {{version}}',
+    'git push origin v{{version}}',
 ]
 
 [changelog]

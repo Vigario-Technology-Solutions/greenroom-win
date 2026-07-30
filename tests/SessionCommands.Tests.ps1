@@ -96,6 +96,49 @@ Describe 'Show-GreenroomSession / Hide-GreenroomSession' {
     }
 }
 
+Describe 'Assert-CanActOnInstance' {
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Test-InstanceElevated { $true }
+        Mock -ModuleName Greenroom Test-SelfElevated { $false }
+        Mock -ModuleName Greenroom Invoke-ElevatedSelf { 0 }
+    }
+
+    It 'escalates for a real run against an elevated instance' {
+        $r = InModuleScope Greenroom { Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' }
+        $r | Should -BeFalse -Because 'the elevated copy did the work, so the caller must not also act'
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 1 -Exactly
+    }
+
+    It 'does NOT escalate under -WhatIf' {
+        # Escalation runs the command again in a NEW process, and -WhatIf is not
+        # forwarded to it -- so a dry run would raise a UAC prompt and then PERFORM THE
+        # REAL ACTION over there. A -WhatIf that acts is worse than no -WhatIf at all.
+        # Setting $WhatIfPreference is exactly what PowerShell does for -WhatIf.
+        $r = InModuleScope Greenroom {
+            $WhatIfPreference = $true
+            Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession'
+        }
+        $r | Should -BeTrue -Because 'the caller proceeds locally, where its own ShouldProcess reports and changes nothing'
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+    }
+
+    It 'refuses instead of escalating under -NoElevate' {
+        $r = InModuleScope Greenroom {
+            Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' -NoElevate -ErrorAction SilentlyContinue
+        }
+        $r | Should -BeFalse
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+    }
+
+    It 'does not escalate at all when the instance is not elevated' {
+        Mock -ModuleName Greenroom Test-InstanceElevated { $false }
+        $r = InModuleScope Greenroom { Assert-CanActOnInstance -Name probe -Command 'Show-GreenroomSession' }
+        $r | Should -BeTrue
+        Should -Invoke -ModuleName Greenroom Invoke-ElevatedSelf -Times 0
+    }
+}
+
 Describe 'Restart-GreenroomSession' {
 
     BeforeEach {

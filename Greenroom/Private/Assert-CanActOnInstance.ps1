@@ -68,6 +68,24 @@ function Assert-CanActOnInstance {
     if (-not (Test-InstanceElevated -Name $Name)) { return $true }
     if (Test-SelfElevated) { return $true }
 
+    # UNDER -WhatIf, DO NOT ESCALATE.
+    #
+    # Escalation runs the command again in a new elevated process, and -WhatIf was not
+    # forwarded to it -- so a dry run against an elevated instance would raise a UAC
+    # prompt and then PERFORM THE REAL ACTION in the other process. A -WhatIf that acts
+    # is worse than no -WhatIf at all.
+    #
+    # Forwarding -WhatIf would technically fix that, but escalating for a dry run is
+    # pointless anyway: it prompts for administrator rights in order to do nothing, and
+    # prints its "What if" into a window the operator may never see. Returning true here
+    # lets the caller's own ShouldProcess report the intent locally and change nothing.
+    #
+    # $WhatIfPreference is inherited by called functions, verified rather than assumed.
+    if ($WhatIfPreference) {
+        Write-Verbose "'$Name' runs elevated; skipping escalation because -WhatIf changes nothing anyway"
+        return $true
+    }
+
     if ($NoElevate) {
         Write-Error -Category PermissionDenied -Message (
             "'$Name' runs ELEVATED and this shell does not. UIPI blocks ShowWindow and " +
