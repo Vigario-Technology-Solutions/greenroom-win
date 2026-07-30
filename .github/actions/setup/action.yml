@@ -1,0 +1,54 @@
+name: Set up a check job
+description: just, plus whichever PowerShell modules the phase needs, with a cache.
+
+# Every check job needs the same two or three lines. Composite actions are what that
+# duplication is for, so the jobs stay one `uses:` and one `run:` and there is one place
+# to change when a version moves.
+#
+# CHECKOUT IS NOT IN HERE, and cannot be: a local composite action is a file in the
+# repository, so the repository has to be on disk before `uses: ./...` can resolve. The
+# checkout step stays in the job that needs it.
+#
+# `modules` is a phase's requirement rather than a fixed list, so the manifest, parse and
+# json jobs install nothing at all. They need pwsh and the tree, which every runner has.
+
+inputs:
+  modules:
+    description: >
+      PowerShell modules this phase requires, as `Name=MinimumVersion` pairs separated by
+      spaces. Empty means the phase needs none.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: extractions/setup-just@v3
+
+    - name: Cache PowerShell modules
+      if: inputs.modules != ''
+      uses: actions/cache@v4
+      with:
+        path: ~\Documents\PowerShell\Modules
+        key: psmodules-${{ runner.os }}-${{ inputs.modules }}
+
+    # Provisioning is a NAMED STEP, not something a check does to a machine on its way
+    # past. It is usually a no-op -- windows-latest ships both modules today -- and it
+    # exists so a runner image that drops one fails here, in a step about dependencies,
+    # rather than somewhere inside a check. The gate itself never installs anything.
+    - name: Ensure PowerShell modules
+      if: inputs.modules != ''
+      shell: pwsh
+      env:
+        MODULES: ${{ inputs.modules }}
+      run: |
+        foreach ($spec in $env:MODULES -split '\s+' | Where-Object { $_ }) {
+          $name, $min = $spec -split '=', 2
+          if (Get-Module -ListAvailable $name | Where-Object Version -ge ([version]$min)) {
+            Write-Host "$name $min or newer: present"
+          }
+          else {
+            Write-Host "$name $min or newer: installing"
+            Install-Module $name -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion $min
+          }
+        }

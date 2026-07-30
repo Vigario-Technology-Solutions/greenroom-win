@@ -44,15 +44,24 @@ exempts the owner and every automation acting on the owner's behalf, which is th
 entire population the rule exists to constrain. To push directly, set `enforcement`
 to `disabled` first — a deliberate, visible act.
 
-**`required_status_checks: ci`** — the context is the `ci` job in
-`.github/workflows/ci.yml`, matched by job name. The name is tautological on
-purpose: renaming a job silently disables this rule rather than failing loudly,
-because a context nothing reports is a check that never arrives and the branch
-waits on it forever. A constant means adding or splitting jobs later never
-touches protection — where a fan-out is wanted, the extra jobs get real names
-and one aggregate `ci` job with `needs:` stays the only required context. Should
-it have to change anyway: relax the rule first, merge, tighten again, then verify
-against a live pull request.
+**`required_status_checks`** — five contexts, one per job in
+`.github/workflows/ci.yml`: `manifest`, `parse`, `json`, `analyze`, `test`. The
+list is meant to *be* the list of what must pass. A single aggregate job
+depending on the others would report one context in place of five, and what a
+reviewer sees would stop being what is enforced — and a job missing from its
+`needs:` would leave this reading as complete while covering less, with nothing
+anywhere to report the gap.
+
+The cost is real: renaming a job here is a protection change, and forgetting
+makes it one leaves this file waiting on a context nothing will ever report,
+which is indistinguishable from one merely pending. That trade is taken because
+the two failures are not comparable — a wedged branch is loud, immediate, and
+fixed by whoever caused it, while silent under-coverage is a false belief held
+indefinitely.
+
+And the wedge is guarded: the `json` phase asserts every context named here
+resolves to a job in the workflow, so a typo fails the check that introduced it
+rather than the branch afterwards.
 
 `strict_required_status_checks_policy` is `false`. Requiring a branch to be up to
 date with `main` before merging turns every merge into a rebase-and-rerun for
@@ -61,6 +70,6 @@ nobody asked for. `required_linear_history` already keeps the graph readable.
 
 ## Applying it
 
-Apply this **after** `ci` has reported at least once on a pull request. A
+Apply this **after** all five have reported at least once on a pull request. A
 required context that has never run cannot be distinguished from one that is
 merely pending, so applying it first wedges the branch with no obvious cause.
