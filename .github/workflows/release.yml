@@ -1,0 +1,151 @@
+name: Release
+
+# One manual run does the whole release: version in the source, changelog, commit, tag,
+# GitHub Release. There is no release pull request.
+#
+# WHY THIS NEEDS A GITHUB APP.
+#
+# The release commit carries the bumped ModuleVersion and the generated changelog, so
+# it has to land on main -- and main refuses direct pushes from everyone, with zero
+# bypass actors. Something has to be allowed through, and the choice is between:
+#
+#   a) an App that is a ruleset bypass actor, pushing the release commit directly, or
+#   b) opening a release pull request instead.
+#
+# (b) was rejected: a pull request opened with the built-in GITHUB_TOKEN does not
+# trigger `on: pull_request`, so with `check` and `pr-title` required it would sit at
+# "Expected -- waiting for status to be reported" and could never merge. That is the
+# cascade the estate CI/CD document names.
+#
+# So (a). The App's bypass is scoped to what a release actually does: it pushes ONE
+# commit that only ever contains CHANGELOG.md and the manifest, produced by `cog bump`
+# from commits that already went through the gate. It is not a general write channel,
+# and nothing else in this repository uses it.
+#
+# SETUP, once, by the repository owner:
+#   1. Create a GitHub App in the Vigario-Technology-Solutions org.
+#      Repository permissions: Contents: Read and write.
+#      (Nothing else. No pull requests, no actions, no secrets.)
+#   2. Install it on greenroom-win only.
+#   3. Add repository secrets RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY.
+#   4. Add the App as a bypass actor on the `main-protection` ruleset.
+#
+# WHY NOT A PAT: a PAT is a person's credential with that person's reach, it expires,
+# and it does not survive them. An App installation token is scoped to this repository,
+# lasts an hour, and is auditable as itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, or "auto" to derive it from the commits'
+        required: true
+        default: 'auto'
+        type: string
+      dry-run:
+        description: 'Work out the version and changelog, change nothing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read   # the App token does the writing, not GITHUB_TOKEN
+
+env:
+  COG_VERSION: '7.0.0'
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint an App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          # Full history and tags: cog derives the next version from the commits since
+          # the last tag, and generates the changelog from the same range.
+          fetch-depth: 0
+          # Checked out WITH the App token so the push at the end is authenticated as
+          # the App, which is the identity the ruleset bypasses.
+          token: ${{ steps.app.outputs.token }}
+          ref: main
+
+      - name: Install cocogitto
+        run: |
+          set -euo pipefail
+          url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" | tar -xz -C /usr/local/bin cog
+          cog --version
+
+      # The bump commit is made by the App, so it is attributable to the App rather
+      # than to a person who did not write it.
+      - name: Identify as the release App
+        env:
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          git config user.name  "$APP_SLUG[bot]"
+          git config user.email "$APP_SLUG[bot]@users.noreply.github.com"
+
+      - name: Work out what would be released
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$VERSION" = "auto" ]; then
+            next=$(cog bump --auto --dry-run)
+          else
+            next=$(cog bump --version "$VERSION" --dry-run)
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next"
+
+      - name: Release
+        if: ${{ !inputs.dry-run }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Annotated, not lightweight, and deliberately: tag rules only block
+          # re-pointing an ANNOTATED tag, because a lightweight tag moved to a
+          # descendant commit is a fast-forward and would be permitted.
+          #
+          # cog does the rest from cog.toml: pre_bump_hooks writes ModuleVersion via
+          # Update-ModuleManifest, the changelog is prepended above the `- - -`
+          # separator so released sections are never rewritten, and post_bump_hooks
+          # pushes the branch and the tag.
+          if [ "$VERSION" = "auto" ]; then
+            cog bump --auto --annotated "greenroom-win {{version}}"
+          else
+            cog bump --version "$VERSION" --annotated "greenroom-win {{version}}"
+          fi
+
+      - name: Publish the GitHub Release
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Notes come from the changelog section cog just generated, so the Release
+          # page and CHANGELOG.md cannot drift apart -- they are the same text.
+          cog changelog --at "$TAG" > /tmp/notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ steps.plan.outputs.version }}"
+            echo
+            if [ "${{ inputs.dry-run }}" = "true" ]; then
+              echo "Dry run -- nothing was changed."
+            else
+              echo "Released. The tag, the changelog and ModuleVersion all moved together."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

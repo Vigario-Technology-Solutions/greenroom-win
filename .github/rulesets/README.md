@@ -38,14 +38,43 @@ the repository settings. Merge methods are settings: one API call re-enables the
 touching no ruleset and leaving nothing in the ruleset history. The rule holds the
 shape against a setting drifting back.
 
-**`bypass_actors: []`** — an actor-based exemption is inherited by anything
-authenticating as that actor. On a single-owner repository "repository admin"
-exempts the owner and every automation acting on the owner's behalf, which is the
-entire population the rule exists to constrain. To push directly, set `enforcement`
-to `disabled` first — a deliberate, visible act.
+**`required_status_checks: check, pr-title`** — the contexts are the `name:` fields
+of those jobs. Renaming a job silently disables its gate, because the ruleset keeps
+waiting for a context nothing produces. `history` is deliberately *not* required: it
+runs after the merge, so requiring it could only block the next unrelated pull
+request.
 
-## Not included
+**`bypass_actors`: the release App, and nothing else** — this was `[]`, and the
+reasoning for that still holds for humans: an actor-based exemption is inherited by
+anything authenticating as that actor, and "repository admin" on a single-owner
+repository exempts the owner and every automation acting on their behalf, which is
+the entire population the rule exists to constrain.
 
-`required_status_checks` is absent because this repository has no CI. Adding a
-required check whose job never reports wedges the branch permanently, so the rule
-only goes in alongside the workflow that satisfies it.
+The App is the one exception, because the release commit carries the bumped
+`ModuleVersion` and the generated changelog and therefore has to land on `main`. The
+alternative — a release pull request — cannot work: a pull request opened with the
+built-in `GITHUB_TOKEN` does not trigger `on: pull_request`, so the required checks
+would never report and it could never merge.
+
+The grant is scoped to what a release actually does: one commit containing only
+`CHANGELOG.md` and the manifest, produced by `cog bump` from commits that already
+passed the gate. The App holds `Contents: Read and write` on this repository and
+nothing else.
+
+## Before applying
+
+**`actor_id: 0` is a placeholder** and must be replaced with the App's real id. It is
+not a wildcard — applying it as `0` grants nothing, and the first release run would be
+refused by `main`.
+
+```powershell
+gh api /repos/Vigario-Technology-Solutions/greenroom-win/installation --jq '.app_id'
+```
+
+**The `name` must match the live ruleset.** It is `main-protection`. An earlier
+revision of this file said `main: PR only`, so an apply-by-name would have matched
+nothing and silently done nothing.
+
+**Order matters.** Apply only after `check` and `pr-title` are on `main` and have been
+seen to report. A required context that never reports blocks every pull request,
+including the one that would fix it; the way out is relax → merge → tighten → verify.

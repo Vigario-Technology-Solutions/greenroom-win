@@ -1,0 +1,58 @@
+name: Check
+
+# The gate. Runs `just check` and nothing else, so a green local run and a green pull
+# request mean the same thing. If CI could fail where `just check` passes, the pull
+# request becomes the only place a failure can be discovered.
+#
+# ONE job on purpose. This repository is private, so every job re-pays its own setup
+# against billed minutes; a fan-out would buy a more precise red X and pay for it four
+# times over. Public repositories in the estate fan out instead, where minutes are free.
+#
+# NO `paths:` filter, deliberately. A required check with a path filter simply never
+# reports on a pull request that touches nothing it matches, and the branch wedges
+# waiting for a check that will never arrive.
+#
+# The job name below is the required-check context. Renaming it silently disables the
+# gate in .github/rulesets/main.json -- to rename, relax the rule, merge the rename,
+# tighten it again, then verify.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Also on main, so a break introduced by a rebase merge -- which replays branch
+  # commits rather than the reviewed squash -- is reported rather than discovered by
+  # the next person to clone.
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # No history needed: every phase reads the working tree.
+          fetch-depth: 1
+
+      - uses: extractions/setup-just@v3
+
+      # pwsh is preinstalled on the Ubuntu images, which is why this runs on Linux
+      # rather than windows-latest. Nothing in the gate EXECUTES the scripts -- it
+      # parses them, analyses them, and runs tests that mock every Windows call -- so
+      # the Windows-only cmdlets inside are irrelevant to the checker, and Linux
+      # minutes are not billed at the Windows multiplier.
+      #
+      # What this therefore does NOT prove is that the scripts run on Windows. That
+      # needs a Windows runner and a Claude Code login, so it stays a manual
+      # measurement on the reference host.
+      - name: Cache PowerShell modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/powershell/Modules
+          key: psmodules-${{ runner.os }}-pester5-psscriptanalyzer
+
+      - run: just check

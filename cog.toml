@@ -1,0 +1,76 @@
+# cocogitto -- commit linting, changelog generation, version bumping and tagging.
+#
+# ONE TOOL, on purpose. The alternative shape was a linter plus a separate changelog
+# generator, and those two disagree: measured on this repository's own history, a
+# commit whose summary wrapped onto a second line was accepted by one and silently
+# DROPPED by the other, so a change vanished from the release notes with only a warning.
+# A tool that lints with the same parser it generates from cannot disagree with itself.
+#
+# `cog check`  lints history          -- CI runs it on pushes to main
+# `cog verify` lints one message      -- CI runs it on the pull request title
+# `cog bump`   version, changelog, commit and tag, in one step
+
+tag_prefix = "v"
+
+# Bumping from anywhere else would tag a commit that is not on the released line.
+branch_whitelist = ["main"]
+
+ignore_merge_commits = true
+
+# THE VERSION LIVES IN THE SOURCE. ModuleVersion in the manifest is the only version
+# slot in this repository -- there is no VERSION file, deliberately, because two slots
+# are what drift. Update-ModuleManifest is PowerShell's own writer for it, so nothing
+# here hand-edits a manifest.
+#
+# Verified before adopting it: it rewrites ModuleVersion, leaves the manifest valid,
+# and preserves all exports and FormatsToProcess. It does restyle FunctionsToExport
+# and Tags, which is diff churn on the first bump and stable afterwards.
+#
+# The staged `git add` matters: cog builds the bump commit from the index, so a hook
+# that edits a file without staging it leaves the change out of the release commit.
+pre_bump_hooks = [
+    'pwsh -NoProfile -Command "Update-ModuleManifest -Path ./Greenroom/Greenroom.psd1 -ModuleVersion {{version}}"',
+    'git add Greenroom/Greenroom.psd1',
+]
+
+# Pushing the branch and the tag are separate refs and separate pushes. The tag is
+# what a release is; the branch push is what carries the changelog and the bumped
+# manifest back to main.
+post_bump_hooks = [
+    'git push origin main',
+    'git push origin {{version}}',
+]
+
+[changelog]
+path = "CHANGELOG.md"
+# `remote` renders commit and author links against the repository rather than bare
+# hashes, which is the difference between a changelog you can click and one you cannot.
+template = "remote"
+remote = "github.com"
+owner = "Vigario-Technology-Solutions"
+repository = "greenroom-win"
+
+# PREPENDING IS A HARD REQUIREMENT, and cocogitto does it natively by looking for a
+# literal `- - -` separator in CHANGELOG.md. Everything BELOW that line is never
+# touched again, which is what keeps 0.1.0 reading "Initial release." -- a first
+# release has no changes to list, because there is nothing it changed from.
+#
+# Without the separator `cog bump` REFUSES rather than clobbering the file, which was
+# verified rather than assumed.
+
+# Types that describe how the repository is maintained rather than what a user
+# receives produce no release note. The type is release impact, not description.
+[commit_types.docs]
+omit_from_changelog = true
+
+[commit_types.test]
+omit_from_changelog = true
+
+[commit_types.ci]
+omit_from_changelog = true
+
+[commit_types.build]
+omit_from_changelog = true
+
+[commit_types.chore]
+omit_from_changelog = true

@@ -1,0 +1,82 @@
+name: Commit convention
+
+# Two checks, one tool, because the tool that LINTS is the tool that GENERATES.
+#
+# That is why cocogitto is here rather than a linter plus a separate changelog
+# generator. Measured on this repository's own history: a commit whose summary wrapped
+# onto a second line was accepted by the linter and silently DROPPED by the generator,
+# so a real change would have vanished from the release notes behind nothing but a
+# warning. A tool that generates from the same parser it lints with cannot disagree
+# with itself, and that whole class of hole closes by construction.
+#
+#   pr-title   `cog verify` on the pull request title. REQUIRED. The title is the
+#              commit that lands under squash, and therefore the only changelog input.
+#   history    `cog check` on pushes to main. NOT required -- it runs after the merge,
+#              so requiring it could only block the next unrelated pull request. It is
+#              also the only check that sees a REBASE merge, which replays branch
+#              commits verbatim and never passes through a pull request title.
+#
+# cocogitto is installed as a PINNED BINARY rather than through its action: one less
+# third-party action to trust while SHA-pinning is undecided estate-wide, and it pins
+# the exact version the release path was tested against instead of whatever a floating
+# action tag installs.
+
+on:
+  pull_request:
+    # `edited` re-runs when the title changes, so fixing a bad title turns the check
+    # green without needing an empty commit to re-trigger it.
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  COG_VERSION: '7.0.0'
+
+jobs:
+  pr-title:
+    name: pr-title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # cog verify reads one string and cog.toml; no history needed.
+          fetch-depth: 1
+
+      - name: Install cocogitto
+        run: |
+          set -euo pipefail
+          url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" | tar -xz -C /usr/local/bin cog
+          cog --version
+
+      - name: Lint the PR title
+        env:
+          # Through the environment, never interpolated into the script body: a title
+          # is attacker-controlled text, and ${{ }} inside a run block is a script
+          # injection waiting for a backtick or a $().
+          TITLE: ${{ github.event.pull_request.title }}
+        run: cog verify "$TITLE"
+
+  history:
+    name: history
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # cog check walks history, so it needs all of it.
+          fetch-depth: 0
+
+      - name: Install cocogitto
+        run: |
+          set -euo pipefail
+          url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" | tar -xz -C /usr/local/bin cog
+          cog --version
+
+      - run: cog check
