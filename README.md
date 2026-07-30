@@ -22,7 +22,7 @@ Everything needed to stand an instance up lives here, and the installer does as 
 of it as it can without being asked twice. It resolves the right `claude.exe`,
 asserts the flag it depends on, checks the host settings that fail silently, seeds
 trust, registers the task, starts the session, and verifies what it can observe.
-`install.ps1 -Instance <name>` is the whole procedure.
+`Install-GreenroomInstance -Name <name>` is the whole procedure.
 
 **One thing is deliberately not here: memory.** What an instance should *know* is
 personal and specific to whoever runs it — it does not belong in a repository that
@@ -35,31 +35,61 @@ in the tree.
 
 ## Install
 
+greenroom is a PowerShell module. Installing the **module** and provisioning an
+**instance** are two different things, in that order.
+
 ```powershell
 git clone <this repo>
 cd greenroom-win
 Get-ChildItem -Recurse | Unblock-File   # if it arrived as an archive
-.\install.ps1 -Instance desktop-admin
+```
+
+Then install the module. From a local folder as a repository, which needs no gallery
+and no network:
+
+```powershell
+Register-PSResourceRepository -Name greenroom-local -Uri (Resolve-Path .) -Trusted
+Publish-PSResource -Path .\Greenroom -Repository greenroom-local
+Install-PSResource -Name Greenroom -Repository greenroom-local -Scope CurrentUser
+```
+
+Or just copy it onto the module path, which is all the above amounts to:
+
+```powershell
+Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\0.1.0" -Recurse
+```
+
+Either way it then resolves by name, including inside the logon task:
+
+```powershell
+Import-Module Greenroom
+Install-GreenroomInstance -Name desktop-admin
 ```
 
 With a directory grant:
 
 ```powershell
-.\install.ps1 -Instance desktop-admin -AdditionalDirectories "$env:USERPROFILE"
+Install-GreenroomInstance -Name desktop-admin -AdditionalDirectories "$env:USERPROFILE"
 ```
 
-| Switch | |
+| Parameter | |
 |---|---|
-| `-Instance` | required; 1–32 chars, letters/digits/`.`/`-`/`_`, **no spaces** |
-| `-WorkingDirectory` | default `%USERPROFILE%\<instance>` |
+| `-Name` | required; 1–32 chars, letters/digits/`.`/`-`/`_`, **no spaces** |
+| `-WorkingDirectory` | inherited on a re-run; `%USERPROFILE%\<name>` on a first install |
 | `-AdditionalDirectories` | per-instance grants, **default none** |
 | `-TriggerDelay` | logon delay, default `PT1M` |
 | `-ClaudeExe` | override CLI detection |
 | `-Elevated` | run the session as admin, **default off** — see below |
 | `-NoTrustSeed`, `-NoStart` | skip those steps |
+| `-WhatIf`, `-Confirm` | as with every state-changing command here |
 
-Idempotent — re-run any time. It will not kill a running session; new config
-applies at the next restart.
+Idempotent — re-run any time. It will not kill a running session; new config applies
+at the next restart.
+
+**Omitting a parameter INHERITS it** from the previous install rather than falling
+back to a default. That is load-bearing, not a nicety: a bare re-run that reset the
+working directory used to relocate the instance and abandon its project store.
+Clearing is explicit — `-AdditionalDirectories @()`, `-ClaudeExe ''`.
 
 ### Elevated instances
 
@@ -70,23 +100,23 @@ full admin token and no UAC prompt. **Requires an elevated installer** — regis
 It is off by default because it changes how the instance is operated, not as a
 security posture:
 
-- **`attach` and `detach` prompt for elevation.** UIPI stops a normal shell from
-  showing or hiding an elevated window, and the calls fail by returning `false`
-  rather than erroring — so `greenroom` re-launches itself through UAC and the
-  elevated copy does the work. Pass `-NoElevate` to get a plain refusal instead.
-- **`greenroom list` has a blind spot unless it is run elevated too.**
+- **Show and Hide prompt for elevation.** UIPI stops a normal shell from showing or
+  hiding an elevated window, and the calls fail by returning `false` rather than
+  erroring — so the command re-launches itself through UAC and the elevated copy does
+  the work. Pass `-NoElevate` to get a plain refusal instead.
+- **`Get-GreenroomInstance` has a blind spot unless it is run elevated too.**
   `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is
   how instances are named — so from an ordinary shell an elevated session shows as
-  `(unreadable)` rather than by name. Run `list` elevated and the blind spot is
-  gone; it belongs to the shell, not the session.
+  `Opaque` with no name. Run it elevated and the blind spot is gone; it belongs to
+  the shell, not the session.
 - **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
-  `greenroom list` is how you tell.
+  `Get-GreenroomInstance` is how you tell.
 
 Elevation is inherited on a bare re-run, like grants and the working directory, and
 says so each time. Revoke it explicitly:
 
 ```powershell
-.\install.ps1 -Instance desktop-admin -Elevated:$false
+Install-GreenroomInstance -Name desktop-admin -Elevated:$false
 ```
 
 Background: [docs/gotchas.md §6](docs/gotchas.md).
@@ -99,8 +129,8 @@ checks both, but knowing why matters when something is off.
 ### Several instances
 
 ```powershell
-.\install.ps1 -Instance desktop-admin -TriggerDelay PT1M
-.\install.ps1 -Instance render-admin  -TriggerDelay PT2M -WorkingDirectory D:\render-admin
+Install-GreenroomInstance -Name desktop-admin -TriggerDelay PT1M
+Install-GreenroomInstance -Name render-admin  -TriggerDelay PT2M -WorkingDirectory D:\render-admin
 ```
 
 Stagger the delays so they do not race at logon.
@@ -110,31 +140,33 @@ Stagger the delays so they do not race at logon.
 ## Use
 
 ```powershell
-greenroom list
-greenroom attach desktop-admin
-greenroom detach desktop-admin
-greenroom toggle desktop-admin
-greenroom status desktop-admin
+Get-GreenroomInstance                             # what is running
+Show-GreenroomSession    desktop-admin            # reveal it
+Hide-GreenroomSession    desktop-admin            # put it away, session keeps running
+Switch-GreenroomSession  desktop-admin            # whichever it is not
+Restart-GreenroomSession desktop-admin
 ```
 
 With exactly one instance running, the name can be omitted.
 
-`install.ps1` places the command in `%USERPROFILE%\.local\bin`, which is normally
-already on PATH, so no PATH edit and no profile change are needed. One command,
-one shim per shell — the shape npm's `cmd-shim` and Scoop both use:
+`Show-` and `Hide-` are approved verbs and they are also literally what happens: the
+window exists the whole time and these call `ShowWindow` on it. "Attach" was always a
+euphemism for a visibility toggle.
 
-| | |
-|---|---|
-| `greenroom.ps1` | PowerShell resolves this natively from PATH, with full parameter and `ValidateSet` completion. One process |
-| `greenroom.cmd` | four-line forwarder, no logic. `.PS1` is not in `PATHEXT`, so cmd.exe and the Run box cannot run the script directly and need it |
-
-PowerShell prefers the `.ps1` over a same-named `.cmd`, so the extra shell hop is
-paid only by cmd, where it is unavoidable.
+**Everything emits objects**, so the listing feeds the actions:
 
 ```powershell
-greenroom <Tab>            # attach detach status toggle list
-greenroom attach -I<Tab>   # -Instance
+Get-GreenroomInstance | Where-Object { -not $_.Visible } | Show-GreenroomSession
+Get-GreenroomInstance | Where-Object Elevated
+Get-GreenroomInstance | Where-Object { $null -eq $_.Window } | Restart-GreenroomSession
 ```
+
+Every state-changing command supports `-WhatIf` and `-Confirm`. `-Verbose` explains
+what a command decided and why, including the specific reason a window could not be
+resolved.
+
+No PATH entry, no shim, no profile change: the module resolves by name once it is on
+the module path.
 
 ---
 
@@ -151,12 +183,16 @@ Task Scheduler  (at logon, +delay, Interactive, no elevation)
 
 | Path | |
 |---|---|
-| `%USERPROFILE%\.local\bin\greenroom.ps1` | the operator command |
-| `%USERPROFILE%\.local\bin\greenroom.cmd` | generated cmd/Run-box shim |
-| `%USERPROFILE%\.local\bin\greenroom\` | watchdog, launcher, vbs entry point — task-invoked |
+| `<module path>\Greenroom\` | the module — the commands you type |
+| `<module path>\Greenroom\Assets\` | watchdog, launcher, vbs entry point — task-invoked, never by you |
 | `%USERPROFILE%\.claude\greenroom\<instance>\config.json` | resolved paths and grants |
+| `%USERPROFILE%\.claude\greenroom\<instance>\session.json` | the recorded window handle |
 | `%USERPROFILE%\.claude\greenroom\<instance>\watchdog.log` | supervisor log |
 | `%USERPROFILE%\.claude\greenroom\<instance>\launch.log` | per-session launch log |
+
+The `.vbs` finds the watchdog next to itself and the watchdog finds the launcher next
+to itself, so the whole chain relocates with the module and the registered task points
+into wherever it was installed.
 
 The watchdog polls once a second and restarts a dead session. Crash-loop guard:
 more than 5 restarts in 5 minutes triggers a 2-minute backoff. Measured recovery
@@ -172,18 +208,37 @@ are disposable, that reasoning is not.
 ## Repository layout
 
 ```
-install.ps1 / uninstall.ps1
-bin/                            watchdog, launcher, attach/detach control
+Greenroom/
+  Greenroom.psd1                manifest — ModuleVersion is the only version slot
+  Greenroom.psm1                loads Private then Public, exports only Public
+  Greenroom.format.ps1xml       the table view for Greenroom.Instance
+  Public/                       one file per exported command
+  Private/                      helpers, unreachable from outside the module
+  Assets/                       watchdog, launcher, vbs entry point, settings template
+tests/                          Pester
 docs/gotchas.md                 why it is built this way
 docs/provisioning.md            host prerequisites and why each is required
-templates/settings.template.json
 .github/rulesets/main.json      branch protection payload, applied from the tree
 CHANGELOG.md
-VERSION
 ```
+
+`Public/` versus `Private/` is the API boundary: `Get-Command -Module Greenroom` shows
+exactly the supported surface and nothing else.
 
 The changelog records what a release contains. Iterations live in `git log` and the
 pull request record — the repository is the diff.
+
+### Tests
+
+```powershell
+Invoke-Pester ./tests
+Invoke-ScriptAnalyzer -Path ./Greenroom -Recurse -Severity Error,Warning
+```
+
+The analyzer runs with **no settings file and no exclusions**. Where a rule genuinely
+does not apply — the `lParam` Win32's `EnumWindowsProc` delegate requires and the
+callback ignores — it is suppressed at that function with the reason, so a real finding
+elsewhere still fails.
 
 ---
 
@@ -202,9 +257,9 @@ commit. The PR body is a free-form record and is never linted.
 Do not trust a green line from the installer for anything it cannot observe.
 
 1. **No window should have appeared.** Only you can confirm this.
-2. `greenroom attach <instance>` → the session appears.
+2. `Show-GreenroomSession <instance>` → the session appears.
 3. **`/rc active` in the footer.** If absent, `/login` inside the session.
-4. `greenroom detach <instance>` → it disappears; `list` still shows it.
+4. `Hide-GreenroomSession <instance>` → it disappears; `Get-GreenroomInstance` still shows it.
 5. **Cold reboot.** The only test that proves the logon trigger fires and that the
    delay is long enough for whatever the session depends on. Nothing substitutes
    for it. After logging back in, wait ~90 s and check `watchdog.log`.
@@ -221,7 +276,7 @@ Do not trust a green line from the installer for anything it cannot observe.
 | TUI renders as boxes | Launched under conhost. Check `wt` in `config.json` |
 | Trust dialog on first start | The seed was dropped by another Claude process. Installer re-seeds; if it reports RE-SEED FAILED, close other sessions and re-run |
 | `/rc active` missing | Not logged in, or logged in with a `setup-token` |
-| `cannot resolve the window` | The instance has no usable window record — most often a session started before the record existed. `greenroom restart <instance>` creates one |
+| `cannot resolve the window` | The instance has no usable window record — most often a session started before the record existed. `Restart-GreenroomSession <instance>` creates one |
 | Wrong `claude.exe` picked | Pass `-ClaudeExe` |
 
 Restart one instance:
@@ -240,8 +295,8 @@ including the session you are working in. Filter by path or by the instance toke
 ## Uninstall
 
 ```powershell
-.\uninstall.ps1 -Instance desktop-admin
-.\uninstall.ps1 -Instance desktop-admin -KeepState -RemoveScripts
+Uninstall-GreenroomInstance -Name desktop-admin
+Uninstall-GreenroomInstance -Name desktop-admin -KeepState
 ```
 
 The working directory is never touched. Trust entries in `~/.claude.json` are left

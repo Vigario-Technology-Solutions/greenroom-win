@@ -3,12 +3,12 @@
 What a host needs before an instance will run, and why each item is a requirement
 rather than a preference.
 
-`install.ps1` checks everything on this page and refuses or warns rather than
+`Install-GreenroomInstance` checks everything on this page and refuses or warns rather than
 letting you build a setup that fails silently. Every failure in this architecture is
 invisible, because the window is hidden, so a check that runs at install time is
 worth far more than a note telling you to look.
 
-`templates/settings.template.json` carries the shape of a working
+`Greenroom/Assets/settings.template.json` carries the shape of a working
 `%USERPROFILE%\.claude\settings.json`, with the reasoning for each key inline. Fill
 in your own values — the template ships none.
 
@@ -29,7 +29,7 @@ in your own values — the template ships none.
 `--remote-control [name]` is absent in 2.1.92 and present from 2.1.218. Launching
 without it kills the session instantly inside a hidden window; the watchdog restarts
 it, the crash-loop guard trips, and nothing surfaces anywhere. This is the worst
-failure mode in the design, so `install.ps1` asserts the flag before registering
+failure mode in the design, so `Install-GreenroomInstance` asserts the flag before registering
 anything.
 
 Note `--remote-control-session-name-prefix` is a **different** flag that exists on
@@ -87,7 +87,7 @@ Verify from a terminal opened fresh from Explorer or the Start menu:
 Get-Command bash, sh, git | Select-Object Name, Source
 ```
 
-`install.ps1` distinguishes the two cases: not-on-PATH-anywhere versus
+`Install-GreenroomInstance` distinguishes the two cases: not-on-PATH-anywhere versus
 on-PATH-in-the-registry-but-not-in-this-process. They need different responses, and
 they are otherwise indistinguishable.
 
@@ -103,9 +103,9 @@ Anything more is granted at install time and passed as `--add-dir` on the launch
 line, so the grant is scoped to that instance and visible in the process list:
 
 ```powershell
-.\install.ps1 -Instance desktop-admin -AdditionalDirectories "$env:USERPROFILE"
+Install-GreenroomInstance -Name desktop-admin -AdditionalDirectories "$env:USERPROFILE"
 
-.\install.ps1 -Instance render-admin -WorkingDirectory D:\render-admin `
+Install-GreenroomInstance -Name render-admin -WorkingDirectory D:\render-admin `
               -AdditionalDirectories D:\models
 ```
 
@@ -125,7 +125,7 @@ reach.
 Remote Control will not connect from an untrusted directory, and the trust dialog is
 modal — in a hidden window that means the session hangs with no visible reason.
 
-`install.ps1` seeds `hasTrustDialogAccepted` for the working directory in
+`Install-GreenroomInstance` seeds `hasTrustDialogAccepted` for the working directory in
 `~/.claude.json` before first launch, in **both** slash forms, then re-reads the file
 after launch to confirm the seed survived. It does not assume: on any host with
 Claude Desktop there are always other `claude.exe` processes, and any of them can
@@ -134,7 +134,7 @@ says so plainly if that fails.
 
 It refuses to write `~/.claude.json` at all if the result would not parse as JSON.
 
-**This is the only file outside greenroom's own directories that `install.ps1` writes.**
+**This is the only file outside greenroom's own directories that installing writes.**
 `-NoTrustSeed` declines it entirely — run `claude` once in the working directory and
 accept the dialog yourself, and greenroom then touches nothing but
 `~\.local\bin\greenroom` and `~\.claude\greenroom\<instance>`.
