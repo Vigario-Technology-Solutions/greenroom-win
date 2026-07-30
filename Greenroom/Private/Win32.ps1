@@ -37,3 +37,20 @@ $script:SW_RESTORE = 9
 function Get-GreenroomStateRoot {
     Join-Path $env:USERPROFILE '.claude\greenroom'
 }
+
+<#
+  Whether a window is currently visible.
+
+  A one-line wrapper over the P/Invoke, and it earns its place twice. Pester cannot
+  mock a static .NET method, so every decision that branches on visibility -- notably
+  Switch-GreenroomSession choosing which way to toggle -- would be untestable without
+  a function to intercept. It is also the single place three callers read visibility
+  from, rather than three separate casts of the same call.
+#>
+function Test-WindowVisible {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][IntPtr]$Handle)
+
+    return [Greenroom.Win1]::IsWindowVisible($Handle)
+}

@@ -85,15 +85,28 @@ Describe 'Public surface' {
 
 Describe 'State-changing commands' {
 
+    BeforeAll {
+        # Derived, not hardcoded: a command added later is covered automatically instead
+        # of being silently omitted from a list nobody remembered to update. Everything
+        # that is not a Get- changes state in this module.
+        $script:StateChanging = (Get-Command -Module Greenroom | Where-Object { $_.Name -notlike 'Get-*' }).Name
+    }
+
+    It 'has at least one state-changing command to check' {
+        # Guards the derivation itself: a filter that matched nothing would make every
+        # test below pass vacuously.
+        $script:StateChanging.Count | Should -BeGreaterThan 0
+    }
+
     It 'supports ShouldProcess so -WhatIf and -Confirm work' {
-        foreach ($name in 'Show-GreenroomSession', 'Hide-GreenroomSession', 'Restart-GreenroomSession') {
+        foreach ($name in $script:StateChanging) {
             (Get-Command $name).Parameters.Keys | Should -Contain 'WhatIf' -Because "$name changes state"
             (Get-Command $name).Parameters.Keys | Should -Contain 'Confirm'
         }
     }
 
     It 'accepts pipeline input on Name, including Greenroom.Instance objects' {
-        foreach ($name in 'Show-GreenroomSession', 'Hide-GreenroomSession', 'Restart-GreenroomSession') {
+        foreach ($name in $script:StateChanging) {
             $p = (Get-Command $name).Parameters['Name']
             $attr = $p.Attributes | Where-Object { $_ -is [Parameter] }
             ($attr.ValueFromPipeline -contains $true) | Should -BeTrue -Because "$name should accept a name from the pipeline"
