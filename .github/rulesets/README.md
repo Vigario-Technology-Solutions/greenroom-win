@@ -1,10 +1,18 @@
 # Rulesets
 
-`main.json` is the branch protection payload for this repository. It is committed
-because a ruleset is applied state that lives only on GitHub: it vanishes silently
-on repository recreate, rename or fork, and nothing in a clone reveals it is gone.
+`main.json` is the branch protection payload for this repository, applied under the
+name **`main-protection`**. A ruleset is named for what it targets rather than what
+it contains, because contents change and targets do not — this file was called
+`main: PR only` until required checks were added to it, at which point the name
+described protection that no longer existed.
 
-The file is the source of truth. Apply it, do not hand-configure:
+It is committed because a ruleset is applied state that lives only on GitHub: it
+vanishes silently on repository recreate, rename or fork, and nothing in a clone
+reveals it is gone.
+
+The file is the source of truth. Apply it, do not hand-configure — this payload
+went several commits describing protection that had been set by hand and never
+matched it, which is the failure the file exists to prevent:
 
 ```bash
 # create
@@ -28,8 +36,12 @@ gh api repos/<org>/<repo>/rules/branches/main
 request, so requiring one deadlocks the repository. The pull request is the record;
 the approval count adds nothing when there is one reviewer.
 
-**`allowed_merge_methods: squash, rebase`** — no merge commits. A second parent
-buys nothing merging into linear history.
+**`allowed_merge_methods: squash`** — no merge commits and no rebase. A second
+parent buys nothing merging into linear history, and rebase replays a branch's
+commits onto `main` verbatim, so nothing that checked the pull request title has
+covered them. Keeping it would mean the rules here apply to some commits on main
+and not others, decided by which button was pressed. Re-allow it only alongside
+something that lints the commits it lets through.
 
 **`deletion`, `non_fast_forward`** — the branch cannot be removed or rewritten.
 
