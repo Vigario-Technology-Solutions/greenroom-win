@@ -1,0 +1,100 @@
+name: Commit convention
+
+# Its own workflow, because it is its own concern on its own triggers. `ci.yml` answers
+# "does the tree hold up" on a pull request and a push; this answers "will the commit this
+# produces be readable by the tooling that generates releases from it". Folding the two
+# together would mean `edited` in a trigger list where only one job wants it, and an `if:`
+# guard on every job to sort out which event it is for.
+#
+# TWO JOBS, ONE REQUIRED. They are not the same kind of check:
+#
+#   pr-title   REQUIRED. Under squash the pull request title becomes the commit on main,
+#              so it is the only changelog input and the only thing deciding a version
+#              bump. A malformed title is not a style problem -- it drops a change out of
+#              the release notes. Nothing in the tree can catch it, because a title is not
+#              in the tree.
+#
+#   history    NOT REQUIRED, and must never be. It runs on pushes, so it would never
+#              report on a pull request, and a required context that cannot report wedges
+#              the branch permanently. It exists for commits that reached main another
+#              way -- a release bump pushed by a bypass actor, or anything an emergency
+#              `enforcement: disabled` put there -- which never pass a title check and are
+#              exactly what a changelog tool swallows in silence.
+#
+# cocogitto is installed as a PINNED BINARY rather than through its action: one less
+# third-party action to trust while SHA-pinning is undecided estate-wide, and it pins the
+# exact version the release path will be tested against instead of whatever a floating
+# action tag resolves to that day.
+
+on:
+  pull_request:
+    # `edited` re-runs when the title changes, so fixing a bad title turns the check green
+    # without needing an empty commit to re-trigger it.
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  COG_VERSION: '7.0.0'
+
+jobs:
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # cog verify reads one string and cog.toml. No history needed.
+          fetch-depth: 1
+
+      - name: Install cocogitto
+        run: |
+          set -euo pipefail
+          url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" | tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          cog --version
+
+      # cog PANICS without a git identity, even when it is only linting a string:
+      #   called `Result::unwrap()` on an Err value: "config value 'user.name' was not found"
+      # exit 134, a core dump rather than an error. A runner has no identity by default, so
+      # this is required rather than cosmetic.
+      - name: Give git an identity
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Lint the title
+        env:
+          # Through the environment, never interpolated into the script body: a title is
+          # attacker-controlled text, and ${{ }} inside a run block is a script injection
+          # waiting for a backtick or a $().
+          TITLE: ${{ github.event.pull_request.title }}
+        run: cog verify "$TITLE"
+
+  history:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # cog check walks history, so it needs all of it.
+          fetch-depth: 0
+
+      - name: Install cocogitto
+        run: |
+          set -euo pipefail
+          url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" | tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          cog --version
+
+      - name: Give git an identity
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - run: cog check

@@ -1,7 +1,7 @@
 # The gate, in one place.
 #
-# Invoked by `just check` and by .github/workflows/ci.yml, which runs the same
-# `just check` -- so a green local run and a green pull request mean the same thing.
+# Invoked by `just check`, and by .github/workflows/ci.yml one phase at a time -- same
+# script either way, so a green local run and a green pull request mean the same thing.
 # Anything CI enforces that is not reachable from here would make the pull request the
 # only place a failure can be found.
 #
@@ -103,34 +103,41 @@ function Test-JsonFile {
     # from one merely pending, so the branch wedges with no visible cause. Here it is a red
     # check instead, on the pull request that introduced it.
     #
-    # The workflow is read with a regex rather than a YAML parser, because the gate must
-    # run with nothing but pwsh and PowerShell ships no YAML reader. That is a real limit:
-    # it understands the two-space top-level job keys this file uses and would not survive
-    # a rewrite into flow style. The parse phase does not cover .yml, so this is the only
-    # thing reading it -- if it ever stops matching, it reports zero jobs and every context
-    # fails, which is the safe direction to be wrong in.
-    # Both files are required to exist, and their absence is a failure rather than a
-    # skip. Returning "passed" when one is missing would be a fail-OPEN path in a guard
-    # whose whole justification is failing closed: rename or delete either file and the
-    # check goes green while validating nothing, which is precisely the silent
-    # under-coverage the one-context-per-job decision exists to avoid. Neither file is
-    # optional in this repository -- protection lives in the tree, and the workflow is
-    # what satisfies it.
-    $wf = '.github/workflows/ci.yml'
+    # EVERY workflow is scanned, not just ci.yml. A required context is a job name and jobs
+    # live wherever their trigger puts them -- `pr-title` is in commit-convention.yml
+    # because it runs on an event the gate does not. Reading one file made the guard report
+    # a missing job for a context that exists, which is the correct direction to fail in but
+    # the wrong answer.
+    #
+    # Workflows are read with a regex rather than a YAML parser, because the gate must run
+    # with nothing but pwsh and PowerShell ships no YAML reader. That is a real limit: it
+    # understands two-space top-level job keys and would not survive a rewrite into flow
+    # style. Nothing else here reads .yml, so if it ever stops matching it finds no jobs and
+    # every context fails -- the safe direction to be wrong in.
+    #
+    # Absence is a failure rather than a skip. Returning "passed" when the payload or the
+    # workflows are missing would be a fail-OPEN path in a guard whose whole justification
+    # is failing closed: delete either and the check goes green while validating nothing,
+    # which is the silent under-coverage that one context per job exists to avoid.
     $payload = '.github/rulesets/main.json'
-    $absent = @($wf, $payload | Where-Object { -not (Test-Path $_) })
-    if ($absent.Count) {
-        $absent | ForEach-Object { Write-Host "   missing, so required contexts cannot be checked: $_" -ForegroundColor Red }
+    $wfDir = '.github/workflows'
+    $wfFiles = @()
+    if (Test-Path $wfDir) { $wfFiles = @(Get-ChildItem $wfDir -File -Include *.yml, *.yaml -Recurse) }
+    if (-not (Test-Path $payload) -or $wfFiles.Count -eq 0) {
+        if (-not (Test-Path $payload)) { Write-Host "   missing: $payload" -ForegroundColor Red }
+        if ($wfFiles.Count -eq 0) { Write-Host "   no workflows found under $wfDir" -ForegroundColor Red }
         Failed 'json (cannot verify required contexts)'
         return
     }
 
     $jobs = @()
-    $inJobs = $false
-    foreach ($line in Get-Content $wf) {
-        if ($line -match '^jobs:\s*$') { $inJobs = $true; continue }
-        if ($inJobs -and $line -match '^\S') { break }
-        if ($inJobs -and $line -match '^  ([A-Za-z0-9_-]+):\s*$') { $jobs += $Matches[1] }
+    foreach ($f in $wfFiles) {
+        $inJobs = $false
+        foreach ($line in Get-Content $f.FullName) {
+            if ($line -match '^jobs:\s*$') { $inJobs = $true; continue }
+            if ($inJobs -and $line -match '^\S') { break }
+            if ($inJobs -and $line -match '^  ([A-Za-z0-9_-]+):\s*$') { $jobs += $Matches[1] }
+        }
     }
 
     $required = @()
@@ -147,7 +154,7 @@ function Test-JsonFile {
 
     $missing = @($required | Where-Object { $_ -notin $jobs })
     if ($missing.Count) {
-        Write-Host "   $payload requires context(s) with no matching job in ${wf}:" -ForegroundColor Red
+        Write-Host "   $payload requires context(s) with no matching job in any workflow:" -ForegroundColor Red
         $missing | ForEach-Object { Write-Host "     $_" }
         Write-Host "   jobs found: $($jobs -join ', ')"
         Failed 'json (required context has no job)'
