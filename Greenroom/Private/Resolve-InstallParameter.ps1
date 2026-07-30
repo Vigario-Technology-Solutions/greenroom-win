@@ -56,14 +56,22 @@ function Resolve-InstallParameter {
     # swallowing the difference reopens the relocation bug through another door: with
     # nothing to inherit, every omitted parameter falls back to its default.
     if ($prevUnreadable) {
-        $omitted = @('WorkingDirectory', 'TriggerDelay', 'AdditionalDirectories') |
+        # -Elevated belongs in this list even though its consequence is different. The
+        # others fall back to a default that relocates or un-configures the instance;
+        # this one falls back to NOT ELEVATED, silently demoting a session that was
+        # deliberately given a full admin token. Elevation announces itself on every
+        # ordinary re-run precisely because it is security-relevant, so dropping it
+        # without a word on the one path where nothing can be inherited is the worst
+        # place to be quiet.
+        $omitted = @('WorkingDirectory', 'TriggerDelay', 'AdditionalDirectories', 'Elevated') |
                    Where-Object { -not $Bound.ContainsKey($_) } | ForEach-Object { "-$_" }
         if ($omitted.Count -gt 0) {
             throw ("'$cfgPath' exists but cannot be parsed, so this instance's remembered settings are " +
                    "unreadable. Refusing to continue: $($omitted -join ', ') were omitted, and with nothing " +
-                   "to inherit they would fall back to defaults -- relocating the instance to " +
+                   'to inherit they would fall back to defaults -- relocating the instance to ' +
                    "'$(Join-Path $env:USERPROFILE $Name)' and abandoning its project store, memory and " +
-                   'transcripts. Repair or delete that file, or pass every value explicitly.')
+                   'transcripts, and dropping elevation from any instance that had it. Repair or delete ' +
+                   'that file, or pass every value explicitly.')
         }
     }
 

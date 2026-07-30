@@ -133,9 +133,20 @@ Describe 'Resolve-InstallParameter' {
 
         It 'allows an unreadable config when every value is passed explicitly' {
             Set-Content (Join-Path $script:StateRoot 'probe\config.json') '{ not json'
+            { Resolve -Bound @{ WorkingDirectory = $true; TriggerDelay = $true; AdditionalDirectories = $true; Elevated = $true } `
+                      -Extra @{ WorkingDirectory = 'D:\w'; TriggerDelay = 'PT1M'; AdditionalDirectories = @(); Elevated = $true } } |
+                Should -Not -Throw
+        }
+
+        It 'refuses an unreadable config when only -Elevated was omitted' {
+            # The others fall back to a default that relocates the instance. This one
+            # falls back to NOT ELEVATED, silently demoting a session that was
+            # deliberately given a full admin token -- and elevation announces itself on
+            # every ordinary re-run precisely because it is security-relevant.
+            Set-Content (Join-Path $script:StateRoot 'probe\config.json') '{ not json'
             { Resolve -Bound @{ WorkingDirectory = $true; TriggerDelay = $true; AdditionalDirectories = $true } `
                       -Extra @{ WorkingDirectory = 'D:\w'; TriggerDelay = 'PT1M'; AdditionalDirectories = @() } } |
-                Should -Not -Throw
+                Should -Throw '*-Elevated*'
         }
 
         It 'refuses a chosen claude.exe that does not exist' {

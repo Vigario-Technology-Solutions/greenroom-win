@@ -44,7 +44,21 @@ function Invoke-ElevatedSelf {
     # gate before escalating, so the decision is made; a fresh process would otherwise
     # start with default preferences and either prompt a second time or, worse, not
     # prompt at all because -Confirm was never forwarded.
-    $inner = "Import-Module '$manifest' -Force; $Command -Name '$safeName' -NoElevate -Confirm:`$false; exit `$LASTEXITCODE"
+    #
+    # ErrorActionPreference=Stop and an explicit exit, NOT $LASTEXITCODE. That variable
+    # is only set by NATIVE commands, so a PowerShell function that fails with a
+    # non-terminating Write-Error leaves it untouched -- and in a fresh process it is
+    # $null, which exits 0. MEASURED: an inner command whose function wrote a
+    # non-terminating error exited 0, so every recoverable failure over there was
+    # reported here as success, and the caller then skipped acting locally on the
+    # strength of work that never happened.
+    #
+    # The error TEXT is still lost, because the elevated window closes as it exits.
+    # The exit code is what crosses the boundary, so it has to be right.
+    $inner = "`$ErrorActionPreference='Stop'; " +
+             "try { Import-Module '$manifest' -Force; " +
+             "$Command -Name '$safeName' -NoElevate -Confirm:`$false; exit 0 } " +
+             'catch { exit 1 }'
 
     try {
         $p = Start-Process pwsh -Verb RunAs -PassThru -Wait -ErrorAction Stop `

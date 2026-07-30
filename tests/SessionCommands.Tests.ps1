@@ -156,6 +156,22 @@ Describe 'Invoke-ElevatedSelf' {
         }
     }
 
+    It 'signals failure by exit code rather than trusting $LASTEXITCODE' {
+        # $LASTEXITCODE is set by NATIVE commands only. A PowerShell function failing
+        # with a non-terminating Write-Error leaves it untouched, and in a fresh process
+        # it is $null -- which exits 0. Measured: an inner command whose function wrote a
+        # non-terminating error exited 0, so every recoverable failure over there came
+        # back as success and the caller skipped acting on work that never happened.
+        Mock -ModuleName Greenroom Start-Process { [PSCustomObject]@{ ExitCode = 0 } }
+        InModuleScope Greenroom { Invoke-ElevatedSelf -Command 'Show-GreenroomSession' -Name 'probe' } | Out-Null
+        Should -Invoke -ModuleName Greenroom Start-Process -Times 1 -Exactly -ParameterFilter {
+            $cmd = $ArgumentList -join ' '
+            $cmd -match "ErrorActionPreference='Stop'" -and
+            $cmd -match 'exit 1' -and
+            $cmd -notmatch 'LASTEXITCODE'
+        }
+    }
+
     It 'doubles embedded quotes so a path containing one cannot break the command' {
         # The instance name cannot contain a quote, but the MODULE PATH can: a home
         # directory belonging to someone called O'Brien is enough.
