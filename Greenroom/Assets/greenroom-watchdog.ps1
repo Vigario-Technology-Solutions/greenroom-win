@@ -139,6 +139,13 @@ public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
 # Every CASCADIA_HOSTING window currently on the desktop, as a set of handle values.
 function Get-CascadiaHandleSet {
+    # $l is the lParam of Win32's EnumWindowsProc, BOOL CALLBACK(HWND, LPARAM). The
+    # delegate requires it, we pass IntPtr.Zero, and dropping it stops the scriptblock
+    # matching the delegate.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
+    [CmdletBinding()]
+    param()
+
     $script:capHits = @()
     $cb = [GreenroomWd.Win1+EnumWindowsProc] {
         param($h, $l)
@@ -208,6 +215,11 @@ function Save-SessionWindow {
 $titlePattern = [regex]::Escape($Instance) + '$'
 
 function Close-StaleWindows {
+    # Same EnumWindowsProc lParam as above.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
+    [CmdletBinding()]
+    param()
+
     $script:staleHits = @()
     $script:stalePattern = $titlePattern
     $cb = [GreenroomWd.Win1+EnumWindowsProc] {
@@ -233,6 +245,13 @@ function Close-StaleWindows {
 }
 
 function Start-RcSession {
+    # No ShouldProcess: this is the watchdog's internal launch step, private to a script
+    # that runs unattended from a scheduled task. There is no interactive caller for
+    # -WhatIf or -Confirm to serve.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param()
+
     Close-StaleWindows
     # Snapshot the desktop's console windows immediately before launching, so the
     # one this call creates can be identified by difference rather than by title.
