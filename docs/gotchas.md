@@ -119,7 +119,7 @@ yet — so it has no matching title at all, which is exactly when the operator n
 to attach. A title fallback also hides the failure that actually matters: capture
 silently not working looks perfectly healthy right up until the day it resolves
 someone else's window. One source makes a capture failure loud on the first
-attach, and `greenroom restart <instance>` fixes it in one step.
+attach, and `Restart-GreenroomSession <instance>` fixes it in one step.
 
 The stored handle is **validated on every use, never trusted**, against a single
 invariant: the record must have been written for the session being acted on. Both
@@ -145,7 +145,7 @@ read than `Claude Code`. Nothing depends on it.
 
 ## 6. An elevated session cannot be attached from an unelevated shell
 
-Elevation is opt-in per instance (`install.ps1 -Elevated`), and it is off by
+Elevation is opt-in per instance (`Install-GreenroomInstance -Elevated`), and it is off by
 default — but the reason is operational, not a security posture. **Elevation breaks
 attach and detach**, in the silent way, and that is a behaviour change the operator
 has to know about rather than inherit.
@@ -191,7 +191,7 @@ trustworthy signal is comparing `IsWindowVisible` before and after.
 
 That makes both defences necessary rather than belt-and-braces:
 
-- `greenroom.ps1` checks `config.json` *before* acting, so an unelevated shell
+- `Assert-CanActOnInstance` checks `config.json` *before* acting, so an unelevated shell
   escalates rather than walking into a refusal it cannot detect;
 - and every show/hide **verifies by observation afterwards** and reports failure
   loudly. It previously piped `ShowWindow` to `Out-Null` and printed `attached`
@@ -218,7 +218,7 @@ That is the worst possible shape for this project. Everything here is already
 invisible because the window is hidden; a call that reports success while doing
 nothing removes the last signal there was.
 
-**Fix:** `install.ps1` records `elevated` in `config.json`, and `greenroom.ps1`
+**Fix:** `Install-GreenroomInstance` records `elevated` in `config.json`, and the module
 checks it *before* touching a window. When the instance is elevated and the shell
 is not, it **re-launches itself through UAC** and lets the elevated copy do the
 work, so `attach` still attaches.
@@ -247,7 +247,7 @@ token to match, so an elevated session is **visible as a process but
 unidentifiable**, and a naive filter drops it — reporting "no session running" for
 one that is running.
 
-**This is a property of the shell, not of the session.** Run `greenroom list` from
+**This is a property of the shell, not of the session.** Run `Get-GreenroomInstance` from
 an elevated prompt and there is nothing unreadable: every instance resolves by name
 exactly as usual. The blind spot belongs to the observer, and the fix for it is to
 change vantage point, not configuration. The output says so rather than describing
@@ -265,7 +265,7 @@ watchdog → `wt` → `claude` chain, so an elevated instance's supervisor is it
 elevated and always sees its own session.
 
 Nothing on screen distinguishes an elevated session from a normal one — the token
-comes from the task trigger, so there is no prompt and no badge. `greenroom list`
+comes from the task trigger, so there is no prompt and no badge. `Get-GreenroomInstance`
 grew an `Elevated` column to make it legible.
 
 ---
