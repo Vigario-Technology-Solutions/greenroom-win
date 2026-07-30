@@ -16,6 +16,12 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Where this module lives. Needed by the elevation re-launch, which must import the
+# module in a NEW elevated process: a script could re-invoke $PSCommandPath, but a
+# module has no single file to run, and resolving by name would depend on
+# PSModulePath being identical under elevation. An explicit path does not.
+$script:GreenroomModuleRoot = $PSScriptRoot
+
 # Win32.ps1 first and by name: it defines the P/Invoke surface the window helpers
 # bind against, so ordering here is load-bearing rather than alphabetical luck.
 $private = @(Join-Path $PSScriptRoot 'Private\Win32.ps1')
@@ -33,4 +39,7 @@ foreach ($file in @($private) + @($public)) {
 # Exported explicitly from the file names rather than a wildcard. FunctionsToExport
 # in the manifest is the real gate -- a wildcard there defeats command discovery,
 # because PowerShell must then import the whole module to find out what it offers.
-Export-ModuleMember -Function ([IO.Path]::GetFileNameWithoutExtension($public))
+# One name per Public file. GetFileNameWithoutExtension takes a single string, so
+# calling it on the array exported exactly one function and silently hid the rest --
+# which is how Show-GreenroomSession briefly became the entire public surface.
+Export-ModuleMember -Function @($public | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) })
