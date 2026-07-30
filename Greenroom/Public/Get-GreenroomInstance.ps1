@@ -78,7 +78,7 @@ function Get-GreenroomInstance {
             # -Verbose flows through, so `Get-GreenroomInstance -Verbose` explains every
             # unresolved window without this function knowing how to phrase it.
             $hnd = Resolve-SessionWindow -HostPid $th.ProcessId -ClaudePid $s.Pid -Name $s.Instance
-            if ($hnd) { $vis = [Greenroom.Win1]::IsWindowVisible($hnd) }
+            if ($hnd) { $vis = Test-WindowVisible -Handle $hnd }
         }
 
         # $null rather than the strings 'unresolved' and 'n/a' the script used. A column

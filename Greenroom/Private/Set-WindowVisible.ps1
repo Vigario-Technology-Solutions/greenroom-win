@@ -33,14 +33,14 @@ function Set-WindowVisible {
         [Parameter(Mandatory)][bool]$Show
     )
 
-    $before = [Greenroom.Win1]::IsWindowVisible($Handle)
+    $before = Test-WindowVisible -Handle $Handle
     [Greenroom.Win1]::ShowWindow($Handle, $(if ($Show) { $script:SW_RESTORE } else { $script:SW_HIDE })) | Out-Null
     if ($Show) { [Greenroom.Win1]::SetForegroundWindow($Handle) | Out-Null }
 
     # The window manager is asynchronous; IsWindowVisible immediately after the call
     # can still report the old state.
     Start-Sleep -Milliseconds 250
-    $after = [Greenroom.Win1]::IsWindowVisible($Handle)
+    $after = Test-WindowVisible -Handle $Handle
 
     Write-Verbose "window $Handle visible before=$before after=$after (wanted $Show)"
     return ($after -eq $Show)
