@@ -139,6 +139,131 @@ Describe 'Assert-CanActOnInstance' {
     }
 }
 
+Describe 'Invoke-ElevatedSelf' {
+
+    # Deliberately its OWN Describe with no Invoke-ElevatedSelf mock -- mocking the
+    # function under test is how the first version of this passed while proving nothing.
+
+    It 'escalates with -Confirm:$false so the decision is not retaken on defaults' {
+        # The caller has already passed its own ShouldProcess gate by the time this runs.
+        # A fresh elevated process starts with default preferences, so without this it
+        # would either prompt a second time or -- because -Confirm is never forwarded --
+        # not prompt at all.
+        Mock -ModuleName Greenroom Start-Process { [PSCustomObject]@{ ExitCode = 0 } }
+        InModuleScope Greenroom { Invoke-ElevatedSelf -Command 'Show-GreenroomSession' -Name 'probe' } | Out-Null
+        Should -Invoke -ModuleName Greenroom Start-Process -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -match '-Confirm:\$false'
+        }
+    }
+
+    It 'doubles embedded quotes so a path containing one cannot break the command' {
+        # The instance name cannot contain a quote, but the MODULE PATH can: a home
+        # directory belonging to someone called O'Brien is enough.
+        Mock -ModuleName Greenroom Start-Process { [PSCustomObject]@{ ExitCode = 0 } }
+        InModuleScope Greenroom {
+            $script:GreenroomModuleRoot = "C:\Users\O'Brien\Modules\Greenroom"
+            Invoke-ElevatedSelf -Command 'Show-GreenroomSession' -Name 'probe'
+        } | Out-Null
+        Should -Invoke -ModuleName Greenroom Start-Process -Times 1 -Exactly -ParameterFilter {
+            ($ArgumentList -join ' ') -match "O''Brien"
+        }
+    }
+}
+
+Describe 'The self-restart guard' {
+
+    # Also its own Describe: the suite elsewhere mocks Test-SelfIsInstance to $false so
+    # the destructive path can be exercised, and that mock would shadow the thing being
+    # tested here.
+
+    It 'fires for an instance name ending in a dash' {
+        # The dangerous case. A guard that misses lets you restart the instance your own
+        # shell runs inside, which leaves it DOWN rather than restarted.
+        Mock -ModuleName Greenroom Get-CimInstance {
+            [PSCustomObject]@{
+                ProcessId = 4242; Name = 'claude.exe'
+                CommandLine = 'claude.exe --remote-control render-'
+                ParentProcessId = 0
+            }
+        }
+        InModuleScope Greenroom { Test-SelfIsInstance -Name 'render-' } | Should -BeTrue
+    }
+
+    It 'fires for an instance name ending in a dot' {
+        Mock -ModuleName Greenroom Get-CimInstance {
+            [PSCustomObject]@{
+                ProcessId = 4242; Name = 'claude.exe'
+                CommandLine = 'claude.exe --remote-control v1.'
+                ParentProcessId = 0
+            }
+        }
+        InModuleScope Greenroom { Test-SelfIsInstance -Name 'v1.' } | Should -BeTrue
+    }
+
+    It 'does not fire for a different instance sharing a prefix' {
+        Mock -ModuleName Greenroom Get-CimInstance {
+            [PSCustomObject]@{
+                ProcessId = 4242; Name = 'claude.exe'
+                CommandLine = 'claude.exe --remote-control render-two'
+                ParentProcessId = 0
+            }
+        }
+        InModuleScope Greenroom { Test-SelfIsInstance -Name 'render-' } | Should -BeFalse
+    }
+}
+
+Describe 'Instance names ending in a dot or dash' {
+
+    # ValidatePattern allows them -- 'render-' and 'v1.' are legal instance names -- and a
+    # `\b` word boundary does NOT match after a non-word character. Patterns anchored with
+    # `\b` therefore matched nothing for those names, which meant the watchdog and session
+    # were never stopped, and worse, the self-restart guard never fired.
+    #
+    # These assert the pattern the code actually passes matches a real command line,
+    # rather than asserting the pattern's text, so a future rewrite that is still correct
+    # keeps passing.
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-ScheduledTask { [PSCustomObject]@{ TaskName = 'greenroom-x' } }
+        Mock -ModuleName Greenroom Test-SelfIsInstance { $false }
+        Mock -ModuleName Greenroom Assert-CanActOnInstance { $true }
+        Mock -ModuleName Greenroom Stop-VerifiedProcess { 1 }
+        Mock -ModuleName Greenroom Start-ScheduledTask { }
+        Mock -ModuleName Greenroom Start-Sleep { }
+        Mock -ModuleName Greenroom Get-GreenroomInstance {
+            [PSCustomObject]@{ PSTypeName = 'Greenroom.Instance'; Instance = 'render-'; ClaudePid = 1; Opaque = $false }
+        }
+    }
+
+    It 'Restart matches a session whose name ends in a dash' {
+        Restart-GreenroomSession -Name 'render-' | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
+            $Label -eq 'session' -and
+            ('claude.exe --remote-control render- --add-dir C:\x' -match $Pattern)
+        }
+    }
+
+    It 'Restart matches a watchdog whose name ends in a dot' {
+        Restart-GreenroomSession -Name 'v1.' | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
+            $Label -eq 'watchdog' -and
+            ('pwsh.exe -File greenroom-watchdog.ps1 -Instance "v1."' -match $Pattern)
+        }
+    }
+
+    It 'Uninstall matches a session whose name ends in a dash' {
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { [IO.Path]::GetTempPath() }
+        Mock -ModuleName Greenroom Unregister-ScheduledTask { }
+        Mock -ModuleName Greenroom Stop-ScheduledTask { }
+        Uninstall-GreenroomInstance -Name 'render-' | Out-Null
+        Should -Invoke -ModuleName Greenroom Stop-VerifiedProcess -Times 1 -Exactly -ParameterFilter {
+            $Label -eq 'session' -and
+            ('claude.exe --remote-control render-' -match $Pattern)
+        }
+    }
+
+}
+
 Describe 'Restart-GreenroomSession' {
 
     BeforeEach {

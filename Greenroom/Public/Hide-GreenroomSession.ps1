@@ -47,11 +47,11 @@ function Hide-GreenroomSession {
         $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
         if (-not $target) { return }
 
+        if (-not $PSCmdlet.ShouldProcess($target.Instance, 'Hide-GreenroomSession')) { return }
+
         if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Hide-GreenroomSession' -NoElevate:$NoElevate)) {
             return
         }
-
-        if (-not $PSCmdlet.ShouldProcess($target.Instance, 'Hide-GreenroomSession')) { return }
 
         if (Set-WindowVisible -Handle $target.Window -Show $false) {
             Write-Verbose "hidden '$($target.Instance)' -- session still running (claude pid $($target.ClaudePid))"

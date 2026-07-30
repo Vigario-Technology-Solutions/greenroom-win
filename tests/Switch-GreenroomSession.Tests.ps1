@@ -63,13 +63,19 @@ Describe 'Switch-GreenroomSession' {
             -ParameterFilter { $Show -eq $true }
     }
 
-    It 'reads visibility AFTER the escalation check, not before' {
-        # Escalation can hand the whole operation to another process and can block on a
-        # UAC prompt for as long as the operator takes to answer it. A read taken before
-        # that is stale by construction.
+    It 'decides a direction locally but acts on nothing when escalation handled it' {
+        # The ordering changed deliberately: ShouldProcess now gates BEFORE escalation,
+        # so -WhatIf never escalates and -Confirm prompts in the shell the operator typed
+        # in rather than in an elevated window they may never look at. A consequence is
+        # that visibility is read before the escalation check rather than after.
+        #
+        # That is NOT a staleness regression. When escalation happens the elevated copy
+        # re-runs the whole command and takes its own fresh read, so this value is
+        # discarded rather than acted on -- which is what the second assertion pins.
         Mock -ModuleName Greenroom Assert-CanActOnInstance { $false }
         Switch-GreenroomSession -Name probe
-        Should -Invoke -ModuleName Greenroom Test-WindowVisible -Times 0
+        Should -Invoke -ModuleName Greenroom Test-WindowVisible -Times 1 -Exactly
+        Should -Invoke -ModuleName Greenroom Set-WindowVisible -Times 0
     }
 
     It 'performs nothing under -WhatIf' {

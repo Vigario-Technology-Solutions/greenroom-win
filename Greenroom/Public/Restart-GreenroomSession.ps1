@@ -91,18 +91,22 @@ function Restart-GreenroomSession {
             return
         }
 
+        # Gated before escalation: a new elevated process starts with its own
+        # $WhatIfPreference and $ConfirmPreference, so -WhatIf must stop here rather than
+        # be re-decided against defaults over there, and -Confirm must prompt in the
+        # shell the operator typed in.
+        if (-not $PSCmdlet.ShouldProcess($Name, 'Restart-GreenroomSession')) { return }
+
         if (-not (Assert-CanActOnInstance -Name $Name -Command 'Restart-GreenroomSession' -NoElevate:$NoElevate)) {
             return
         }
 
-        if (-not $PSCmdlet.ShouldProcess($Name, 'Restart-GreenroomSession')) { return }
-
         $esc = [regex]::Escape($Name)
 
         $stopped =
-            (Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern "greenroom-watchdog.*-Instance\s+`"?$esc\b" -Label 'watchdog') +
-            (Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern "--remote-control\s+$esc\b"                 -Label 'session')  +
-            (Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern "greenroom-launch.*-Instance\s+`"?$esc\b"   -Label 'launcher')
+            (Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog') +
+            (Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session')  +
+            (Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher')
 
         if ($stopped -eq 0) { Write-Verbose "nothing was running for '$Name'" }
 

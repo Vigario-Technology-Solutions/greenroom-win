@@ -62,7 +62,7 @@ function Test-SelfIsInstance {
     for ($hop = 0; $hop -lt 8 -and $ancestor; $hop++) {
         $p = Get-CimInstance Win32_Process -Filter "ProcessId=$ancestor" -ErrorAction SilentlyContinue -Verbose:$false
         if (-not $p) { return $false }
-        if ($p.Name -eq 'claude.exe' -and $p.CommandLine -match "--remote-control\s+$esc\b") { return $true }
+        if ($p.Name -eq 'claude.exe' -and $p.CommandLine -match ('--remote-control\s+"?' + $esc + '("|\s|$)')) { return $true }
         $ancestor = $p.ParentProcessId
     }
     return $false

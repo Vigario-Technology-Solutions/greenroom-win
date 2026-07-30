@@ -30,11 +30,21 @@ function Invoke-ElevatedSelf {
 
     Write-Warning "'$Name' runs elevated and this shell does not. Re-launching elevated..."
 
-    $manifest = Join-Path $script:GreenroomModuleRoot 'Greenroom.psd1'
-    # Single-quoted inside the -Command string so nothing in a path or an instance name
-    # is re-interpreted by the elevated shell. Instance names are validated on install
-    # to letters, digits, dot, dash and underscore, so they cannot contain a quote.
-    $inner = "Import-Module '$manifest' -Force; $Command -Name '$Name' -NoElevate; exit `$LASTEXITCODE"
+    # Single-quoted inside the -Command string so nothing is re-interpreted by the
+    # elevated shell, with embedded quotes doubled -- which is how PowerShell escapes a
+    # quote inside a single-quoted string.
+    #
+    # The instance name cannot contain one (ValidatePattern allows only letters, digits,
+    # dot, dash and underscore) but THE MODULE PATH CAN: a home directory belonging to
+    # someone called O'Brien is enough to break the command otherwise.
+    $manifest = (Join-Path $script:GreenroomModuleRoot 'Greenroom.psd1').Replace("'", "''")
+    $safeName = $Name.Replace("'", "''")
+
+    # -Confirm:$false, deliberately. The caller has ALREADY passed its own ShouldProcess
+    # gate before escalating, so the decision is made; a fresh process would otherwise
+    # start with default preferences and either prompt a second time or, worse, not
+    # prompt at all because -Confirm was never forwarded.
+    $inner = "Import-Module '$manifest' -Force; $Command -Name '$safeName' -NoElevate -Confirm:`$false; exit `$LASTEXITCODE"
 
     try {
         $p = Start-Process pwsh -Verb RunAs -PassThru -Wait -ErrorAction Stop `
@@ -68,21 +78,15 @@ function Assert-CanActOnInstance {
     if (-not (Test-InstanceElevated -Name $Name)) { return $true }
     if (Test-SelfElevated) { return $true }
 
-    # UNDER -WhatIf, DO NOT ESCALATE.
-    #
-    # Escalation runs the command again in a new elevated process, and -WhatIf was not
-    # forwarded to it -- so a dry run against an elevated instance would raise a UAC
-    # prompt and then PERFORM THE REAL ACTION in the other process. A -WhatIf that acts
-    # is worse than no -WhatIf at all.
-    #
-    # Forwarding -WhatIf would technically fix that, but escalating for a dry run is
-    # pointless anyway: it prompts for administrator rights in order to do nothing, and
-    # prints its "What if" into a window the operator may never see. Returning true here
-    # lets the caller's own ShouldProcess report the intent locally and change nothing.
+    # A BACKSTOP, not the primary guard. Every public command gates on ShouldProcess
+    # BEFORE calling this, so under -WhatIf escalation is already unreachable. This
+    # stays because the cost of the ordering silently regressing is a dry run that
+    # raises a UAC prompt and then performs the real action in the other process --
+    # which is exactly what happened before that ordering was fixed.
     #
     # $WhatIfPreference is inherited by called functions, verified rather than assumed.
     if ($WhatIfPreference) {
-        Write-Verbose "'$Name' runs elevated; skipping escalation because -WhatIf changes nothing anyway"
+        Write-Verbose "'$Name' runs elevated; not escalating because -WhatIf changes nothing anyway"
         return $true
     }
 

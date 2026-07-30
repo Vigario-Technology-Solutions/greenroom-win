@@ -69,7 +69,10 @@
 #>
 function Install-GreenroomInstance {
     [CmdletBinding(SupportsShouldProcess)]
-    [OutputType('Greenroom.Instance')]
+    # Both, because -NoStart returns a different shape: there is no session to describe,
+    # so it reports what was provisioned instead. Declaring only one misleads anything
+    # reading OutputType metadata, including Get-Command -Syntax and editor tooling.
+    [OutputType('Greenroom.Instance', 'Greenroom.InstallResult')]
     param(
         # ValueFromPipeline as well as ByPropertyName, so a bare name works and not only
         # a Greenroom.Instance. Piping into an install is safe precisely because a bare

@@ -56,14 +56,17 @@ function Show-GreenroomSession {
         $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
         if (-not $target) { return }
 
-        # Escalate before ShouldProcess. An elevated re-launch performs the whole
-        # operation in the other process, including its own -WhatIf handling, so asking
-        # here as well would prompt twice for one action.
+        # ASK BEFORE ESCALATING. Escalation runs this command again in a NEW process,
+        # which starts with its own $WhatIfPreference and $ConfirmPreference -- so
+        # anything decided only over there is decided against defaults, not against what
+        # the operator asked for. Gating here means -WhatIf never escalates at all, and
+        # -Confirm prompts once, in the shell the operator typed in rather than in an
+        # elevated window they may never look at.
+        if (-not $PSCmdlet.ShouldProcess($target.Instance, 'Show-GreenroomSession')) { return }
+
         if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Show-GreenroomSession' -NoElevate:$NoElevate)) {
             return
         }
-
-        if (-not $PSCmdlet.ShouldProcess($target.Instance, 'Show-GreenroomSession')) { return }
 
         # Success is SILENT: the operator watches a window appear, which beats a line of
         # text, and a pipeline of ten should not print ten confirmations. -Verbose has it.

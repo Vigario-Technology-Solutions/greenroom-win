@@ -60,18 +60,22 @@ function Switch-GreenroomSession {
         $target = Resolve-GreenroomTarget -Name $Name -RequireWindow
         if (-not $target) { return }
 
-        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Switch-GreenroomSession' -NoElevate:$NoElevate)) {
-            return
-        }
-
-        # Deliberately NOT $target.Visible, which was read during discovery and is
-        # already stale by the time the escalation check above has run.
+        # Deliberately NOT $target.Visible, which was read during discovery and may
+        # already be stale. This is the last read before the direction is chosen.
         $show = -not (Test-WindowVisible -Handle $target.Window)
         $verb = if ($show) { 'show' } else { 'hide' }
 
         # The direction goes in the ShouldProcess description so -WhatIf reports which
         # way it would go, rather than an unhelpful "would switch".
+        #
+        # Gated before escalation: a new elevated process starts with its own
+        # $WhatIfPreference and $ConfirmPreference, so anything decided only over there
+        # is decided against defaults rather than against what the operator asked for.
         if (-not $PSCmdlet.ShouldProcess($target.Instance, "Switch-GreenroomSession (would $verb)")) { return }
+
+        if (-not (Assert-CanActOnInstance -Name $target.Instance -Command 'Switch-GreenroomSession' -NoElevate:$NoElevate)) {
+            return
+        }
 
         if (Set-WindowVisible -Handle $target.Window -Show $show) {
             Write-Verbose "switched '$($target.Instance)' to $verb (claude pid $($target.ClaudePid), window $($target.Window))"
