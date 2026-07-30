@@ -1,4 +1,4 @@
-# cocogitto -- commit convention linting.
+# cocogitto -- commit linting, changelog generation, version bumping and tagging.
 #
 # ONE TOOL, on purpose. The alternative shape was a linter plus a separate changelog
 # generator, and those two can disagree: a commit whose summary wraps onto a second line
@@ -10,12 +10,84 @@
 #   cog verify "<subject>"   lints one message   -- CI runs it on the pull request title
 #   cog check                lints history       -- CI runs it on pushes to main
 #
-# THIS FILE CARRIES ONLY WHAT LINTING NEEDS. Version bumping, changelog generation and
-# tagging bring `tag_prefix`, `branch_whitelist`, the bump hooks and the `[changelog]`
-# block with them, in the change that introduces the release path. Configuration arrives
-# with the thing that uses it, so a reader can tell what is live from what is aspirational.
-
+#   cog bump                 version, changelog, commit and tag, in one step
+#
 # `cog check` walks history. Merge commits are not authored to a convention and never
 # reach main here anyway -- the ruleset allows squash only -- so they are noise rather
 # than findings.
 ignore_merge_commits = true
+
+# `v` marks a git REF, not a version. The tag carries it and ModuleVersion does not --
+# semver says `v1.2.3` is not a semantic version, and PowerShell's ModuleVersion is
+# [Version]-typed and could not hold a prefix if it wanted to.
+tag_prefix = "v"
+
+# Bumping from anywhere else would tag a commit that is not on the released line.
+# Measured: `cog bump` on another branch refuses with "No patterns matched in [main]".
+branch_whitelist = ["main"]
+
+# THE VERSION LIVES IN THE SOURCE. ModuleVersion in the manifest is the only version slot
+# in this repository -- there is no VERSION file, deliberately, because two slots are what
+# drift. Update-ModuleManifest is PowerShell's own writer for it, so nothing here
+# hand-edits a manifest.
+#
+# Verified before adopting it: it rewrites ModuleVersion, leaves the manifest valid, and
+# preserves the exports and FormatsToProcess. It does restyle FunctionsToExport and Tags,
+# which is 13 lines of diff churn on the first bump and stable afterwards.
+#
+# The staged `git add` matters: cog builds the bump commit from the index, so a hook that
+# edits a file without staging it leaves the change out of the release commit.
+pre_bump_hooks = [
+    'pwsh -NoProfile -Command "Update-ModuleManifest -Path ./Greenroom/Greenroom.psd1 -ModuleVersion {{version}}"',
+    'git add Greenroom/Greenroom.psd1',
+]
+
+# The branch and the tag are separate refs and separate pushes. The tag is what a release
+# IS; the branch push is what carries the changelog and the bumped manifest back to main.
+#
+# `v{{version}}`, NOT `{{version}}`, and the `v` is not decoration. `{{version}}` expands
+# to the VERSION, which is bare, while the thing being pushed is a REF, which carries the
+# prefix. Getting it wrong is silent: `git push origin 0.2.0` pushes nothing, the tag stays
+# on the runner, and the release exists nowhere.
+#
+# Both halves were measured rather than inferred from each other, because the two surfaces
+# read differently: `cog bump --dry-run` prints the prefixed `v0.2.0` (it is telling you
+# the tag) while the hook template gives the bare `0.2.0` (it is giving you the version).
+post_bump_hooks = [
+    'git push origin main',
+    'git push origin v{{version}}',
+]
+
+[changelog]
+path = "CHANGELOG.md"
+# `remote` renders commit and author links against the repository rather than bare hashes,
+# which is the difference between a changelog you can click and one you cannot.
+template = "remote"
+remote = "github.com"
+owner = "Vigario-Technology-Solutions"
+repository = "greenroom-win"
+
+# PREPENDING IS A HARD REQUIREMENT and cocogitto does it natively, by looking for a literal
+# `- - -` separator in CHANGELOG.md. Everything below that line is never touched again,
+# which is what keeps 0.1.0 reading "Initial release." -- a first release has no changes to
+# list, because there is nothing it changed from.
+#
+# Rehearsed end to end against a throwaway remote before landing: two releases in sequence,
+# each prepending above the previous, with the hand-written 0.1.0 untouched underneath.
+
+# Types describing how the repository is maintained rather than what a user receives
+# produce no release note. The type encodes release impact, not the nature of the change.
+[commit_types.docs]
+omit_from_changelog = true
+
+[commit_types.test]
+omit_from_changelog = true
+
+[commit_types.ci]
+omit_from_changelog = true
+
+[commit_types.build]
+omit_from_changelog = true
+
+[commit_types.chore]
+omit_from_changelog = true

@@ -60,3 +60,12 @@ verify subject:
 # Lint the whole history, as the post-merge check does.
 lint:
     @cog check
+
+# What the next release would be, and what would be in it. Writes nothing.
+next:
+    @cog bump --auto --dry-run
+    @cog changelog
+
+# Release. Normally run by the workflow, not by hand -- it commits, tags and pushes.
+release version="--auto":
+    @cog bump {{ if version == "--auto" { "--auto" } else { "--version " + version } }} --annotated "greenroom-win {{{{version}}}}"

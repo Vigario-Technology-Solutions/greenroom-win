@@ -50,11 +50,27 @@ the repository settings. Merge methods are settings: one API call re-enables the
 touching no ruleset and leaving nothing in the ruleset history. The rule holds the
 shape against a setting drifting back.
 
-**`bypass_actors: []`** — an actor-based exemption is inherited by anything
-authenticating as that actor. On a single-owner repository "repository admin"
-exempts the owner and every automation acting on the owner's behalf, which is the
-entire population the rule exists to constrain. To push directly, set `enforcement`
-to `disabled` first — a deliberate, visible act.
+**`bypass_actors`** — exactly one, the release App, and `actor_id` is `0` until
+that App exists. An actor-based exemption is inherited by anything authenticating
+as that actor, which is why "repository admin" is not used: on a single-owner
+repository it exempts the owner and every automation acting on the owner's
+behalf, the entire population the rule exists to constrain. An App is a narrower
+actor — it is only ever itself, its installation token lasts an hour, and
+revoking it is uninstalling it.
+
+It is here because a release has to write `main` and the alternative is worse. A
+pull request opened with the built-in `GITHUB_TOKEN` does not trigger
+`on: pull_request`, so a release PR would sit forever on six required contexts
+that can never report. The App pushes one commit containing only `CHANGELOG.md`
+and the manifest, built by `cog bump` from commits that already passed the gate.
+
+**`actor_id: 0` is a placeholder and applying it is safe** — a bypass list naming
+an actor that does not exist is equivalent to an empty one. Replace it with the
+real App id once the App exists, then re-apply; until then the release workflow
+cannot push, which is the correct failure.
+
+To push by hand instead, set `enforcement` to `disabled` first — a deliberate,
+visible act.
 
 **`required_status_checks`** — six contexts, one per job that must pass:
 `manifest`, `parse`, `json`, `analyze` and `test` from `.github/workflows/ci.yml`,
