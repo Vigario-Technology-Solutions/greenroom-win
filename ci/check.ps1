@@ -95,7 +95,66 @@ function Test-JsonFile {
             Write-Host "   $(Resolve-Path -Relative $f.FullName): $($_.Exception.Message)" -ForegroundColor Red
         }
     }
-    if ($bad) { Failed "json ($bad file(s))" } else { Passed "json ($($files.Count) file(s))" }
+    if ($bad) { Failed "json ($bad file(s))"; return }
+
+    # Every required context must name a job that exists. This is what makes one context
+    # per check safe: renaming a job is a protection change, and forgetting to make it one
+    # leaves the ruleset waiting on a context nothing will ever report -- indistinguishable
+    # from one merely pending, so the branch wedges with no visible cause. Here it is a red
+    # check instead, on the pull request that introduced it.
+    #
+    # The workflow is read with a regex rather than a YAML parser, because the gate must
+    # run with nothing but pwsh and PowerShell ships no YAML reader. That is a real limit:
+    # it understands the two-space top-level job keys this file uses and would not survive
+    # a rewrite into flow style. The parse phase does not cover .yml, so this is the only
+    # thing reading it -- if it ever stops matching, it reports zero jobs and every context
+    # fails, which is the safe direction to be wrong in.
+    # Both files are required to exist, and their absence is a failure rather than a
+    # skip. Returning "passed" when one is missing would be a fail-OPEN path in a guard
+    # whose whole justification is failing closed: rename or delete either file and the
+    # check goes green while validating nothing, which is precisely the silent
+    # under-coverage the one-context-per-job decision exists to avoid. Neither file is
+    # optional in this repository -- protection lives in the tree, and the workflow is
+    # what satisfies it.
+    $wf = '.github/workflows/ci.yml'
+    $payload = '.github/rulesets/main.json'
+    $absent = @($wf, $payload | Where-Object { -not (Test-Path $_) })
+    if ($absent.Count) {
+        $absent | ForEach-Object { Write-Host "   missing, so required contexts cannot be checked: $_" -ForegroundColor Red }
+        Failed 'json (cannot verify required contexts)'
+        return
+    }
+
+    $jobs = @()
+    $inJobs = $false
+    foreach ($line in Get-Content $wf) {
+        if ($line -match '^jobs:\s*$') { $inJobs = $true; continue }
+        if ($inJobs -and $line -match '^\S') { break }
+        if ($inJobs -and $line -match '^  ([A-Za-z0-9_-]+):\s*$') { $jobs += $Matches[1] }
+    }
+
+    $required = @()
+    $doc = [System.Text.Json.JsonDocument]::Parse((Get-Content $payload -Raw))
+    try {
+        foreach ($rule in $doc.RootElement.GetProperty('rules').EnumerateArray()) {
+            if ($rule.GetProperty('type').GetString() -ne 'required_status_checks') { continue }
+            foreach ($c in $rule.GetProperty('parameters').GetProperty('required_status_checks').EnumerateArray()) {
+                $required += $c.GetProperty('context').GetString()
+            }
+        }
+    }
+    finally { $doc.Dispose() }
+
+    $missing = @($required | Where-Object { $_ -notin $jobs })
+    if ($missing.Count) {
+        Write-Host "   $payload requires context(s) with no matching job in ${wf}:" -ForegroundColor Red
+        $missing | ForEach-Object { Write-Host "     $_" }
+        Write-Host "   jobs found: $($jobs -join ', ')"
+        Failed 'json (required context has no job)'
+        return
+    }
+
+    Passed "json ($($files.Count) file(s), $($required.Count) required context(s) resolve)"
 }
 
 # Static analysis with DEFAULT rules and no settings file. Where a rule genuinely does

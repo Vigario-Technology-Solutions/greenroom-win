@@ -1,89 +1,121 @@
 name: CI
 
-# The gate. Runs `just check` and nothing else, so a green local run and a green pull
-# request mean the same thing. If CI could fail where `just check` passes, the pull
-# request becomes the only place a failure can be discovered.
+# Does the tree hold up. Five jobs, five required contexts, one per thing that can fail
+# for its own reason -- the module's contract, its syntax, the payloads it ships, its
+# static analysis, its behaviour.
 #
-# ONE job on purpose. This repository is private, so every job re-pays its own setup
-# against billed minutes; a fan-out would buy a more precise red X and pay for it four
-# times over. Public repositories in the estate fan out instead, where minutes are free.
+# ONE JOB PER CHECK, not per phase-group. A job reports a single status when it ends, so
+# grouping a fast check with a slow one holds the fast answer hostage: measured on this
+# tree, manifest is 0.4s and test is 9.9s. That gap is small here and will not stay small
+# once there is a real suite, and the fix costs nothing on a public repository where
+# minutes are free.
 #
-# NO `paths:` filter, deliberately. A required check with a path filter simply never
-# reports on a pull request that touches nothing it matches, and the branch wedges
-# waiting for a check that will never arrive.
+# NO AGGREGATE. The required-check list is meant to BE the list of what must pass, not a
+# summary of it. An aggregate reports one context in place of five and what a reviewer
+# sees stops being what is enforced -- and a job missing from its `needs:` leaves
+# protection reading as complete while covering less, with nothing to report the gap.
 #
-# The job below is named `ci` and that name IS the required-check context in
-# .github/rulesets/main.json. It is deliberately tautological rather than descriptive:
-# renaming a job does not fail loudly, it leaves the ruleset waiting on a context nothing
-# will ever report, which is indistinguishable from one merely pending. A constant name
-# means splitting or adding jobs later never touches protection. Should it ever need to
-# change anyway: relax the rule, merge the rename, tighten it again, then verify.
+# The cost of that choice is real and accepted: renaming a job here is a protection
+# change, and forgetting leaves the ruleset waiting on a context nothing will report. The
+# json phase asserts every context in .github/rulesets/main.json resolves to a job below,
+# so that mistake is a red check rather than a wedged branch.
+#
+# ONE FILE, because these five answer one question on one trigger. Commit convention and
+# releases have different triggers and live in their own workflows. When there is a build
+# to run, it belongs here too, with `needs:` on these -- artifacts are scoped to a
+# workflow run, and anything downstream keyed on `workflow_run` names one workflow rather
+# than enumerating five and working out whether all of them passed.
+#
+# NO `paths:` filter, deliberately. A required check with a path filter never reports on a
+# pull request that touches nothing it matches, and the branch wedges waiting for it.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  # Also on main, so a break introduced by a rebase merge -- which replays branch
-  # commits rather than the reviewed squash -- is reported rather than discovered by
-  # the next person to clone.
+  # Also on main, so a break introduced by a rebase merge -- which replays branch commits
+  # rather than the reviewed squash -- is reported rather than discovered by the next
+  # person to clone.
   push:
     branches: [main]
+  # Fire the whole gate from the Actions tab without pushing a commit. Worth having
+  # because re-running is otherwise scoped to a run that already exists: after a runner
+  # image changes, a cached module goes stale, or a dependency is fixed outside this
+  # repository, there is no commit to attach a re-run to and an empty one is a poor way
+  # to ask a question.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  ci:
-    # WINDOWS, and it costs 2x the minutes of a Linux runner on a private repository.
-    # That is paid deliberately.
-    #
-    # This first ran on ubuntu-latest, on the reasoning that nothing in the gate
-    # EXECUTES the scripts -- it parses them, analyses them, and the tests mock every
-    # Windows call. That reasoning was wrong, and this workflow's own first run proved
-    # it: 39 of 95 tests failed with "Could not find Command Get-ScheduledTask".
-    #
-    # Pester's Mock requires a command to EXIST before it can be mocked. The
-    # ScheduledTasks cmdlets ship only on Windows, so on Linux there is nothing to
-    # attach a mock to. Stubbing them would be faking the platform, and skipping those
-    # tests would report green while silently dropping 40% of the suite -- which is
-    # worse than either paying for Windows or not testing at all.
-    #
-    # The compensation is real: on Windows the suite exercises the actual cmdlets it
-    # mocks, so the gate is closer to the platform it targets than the Linux version
-    # could ever have been. It still does not prove a session starts -- that needs a
-    # Claude Code login, and stays a manual measurement on the reference host.
+  # The manifest is the module's contract: the version, the exported surface, the format
+  # file. Test-ModuleManifest is the only thing that checks the declared exports actually
+  # resolve, and a manifest that does not load takes the whole module with it.
+  manifest:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          # No history needed: every phase reads the working tree.
           fetch-depth: 1
-
-      - uses: extractions/setup-just@v3
-
-      - name: Cache PowerShell modules
-        uses: actions/cache@v4
-        with:
-          path: ~\Documents\PowerShell\Modules
-          key: psmodules-${{ runner.os }}-pester5-psscriptanalyzer
-
-      # Provisioning is a NAMED STEP rather than something the gate does to a machine on
-      # its way past. windows-latest ships both today, so this is usually a no-op; it is
-      # here so that a runner image dropping one fails in a step called "dependencies"
-      # instead of somewhere inside a check, and so the gate itself never installs
-      # anything on a contributor's machine or silently moves the analyzer version it
-      # enforces.
-      - name: Ensure check dependencies
+      - uses: ./.github/actions/setup
+      - run: just manifest
         shell: pwsh
-        run: |
-          $need = @{ PSScriptAnalyzer = '1.21.0'; Pester = '5.0.0' }
-          foreach ($m in $need.GetEnumerator()) {
-            if (Get-Module -ListAvailable $m.Key | Where-Object Version -ge ([version]$m.Value)) {
-              Write-Host "$($m.Key) present"
-            }
-            else {
-              Install-Module $m.Key -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion $m.Value
-            }
-          }
 
-      - run: just check
+  # A syntax error commits cleanly and only surfaces when the watchdog next tries to
+  # launch a session, on a host nobody is watching. The .ps1xml is parsed as XML for the
+  # same reason: a malformed format file imports fine and the view simply does not exist.
+  parse:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/setup
+      - run: just parse
+        shell: pwsh
+
+  # The branch-protection payload is applied FROM THE TREE, so a malformed one is a
+  # protection change that fails at apply time instead of at review time. This job also
+  # asserts every required context named in that payload exists as a job in this file.
+  json:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/setup
+      - run: just json
+        shell: pwsh
+
+  analyze:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/setup
+        with:
+          modules: PSScriptAnalyzer=1.21.0
+      - run: just analyze
+        shell: pwsh
+
+  # WINDOWS, and not negotiable. This first ran on ubuntu-latest, reasoning that nothing
+  # here executes anything -- it parses, analyses, and the tests mock every Windows call.
+  # The first run disproved it: 39 of 95 tests failed with "Could not find Command
+  # Get-ScheduledTask", because Pester's Mock needs the command to EXIST before it can
+  # attach to it, and the ScheduledTasks cmdlets ship only on Windows. Stubbing them would
+  # fake the platform; skipping them would report green while dropping 40% of the suite.
+  #
+  # It still does not prove a session starts -- that needs a Claude Code login, and stays
+  # a manual measurement on the reference host.
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/setup
+        with:
+          modules: Pester=5.0.0
+      - run: just test
         shell: pwsh
