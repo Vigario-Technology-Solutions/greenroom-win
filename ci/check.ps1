@@ -74,15 +74,22 @@ function Test-Parse {
 # apply time instead of at review time -- and protection that silently failed to apply
 # is the worst kind, because nothing in a clone reveals it is gone.
 #
-# -AsHashtable because a settings-shaped file can carry keys differing only in case,
-# which the object parser rejects outright. The question here is whether the JSON is
-# well formed, not whether it maps onto an object.
+# System.Text.Json rather than ConvertFrom-Json, which ACCEPTS A TRAILING COMMA. Nothing
+# that consumes these files does: GitHub rejects the ruleset payload, and Node rejects
+# ~/.claude.json, which is why Set-ProjectTrust already validates with this parser after
+# writing. A gate whose parser is more permissive than every consumer can only certify
+# files that then fail somewhere it cannot see.
+#
+# It also happens to be the right tool for the reason -AsHashtable was originally used:
+# a settings-shaped file can carry keys differing only in case, which the object parser
+# rejects outright. JsonDocument is a reader over the text rather than a map, so it takes
+# them without complaint while staying strict about the syntax that actually matters.
 function Test-JsonFile {
     Announce 'json'
     $bad = 0
     $files = Get-ChildItem -Recurse -Include *.json -File
     foreach ($f in $files) {
-        try { Get-Content $f.FullName -Raw | ConvertFrom-Json -AsHashtable | Out-Null }
+        try { [System.Text.Json.JsonDocument]::Parse((Get-Content $f.FullName -Raw)).Dispose() }
         catch {
             $bad++
             Write-Host "   $(Resolve-Path -Relative $f.FullName): $($_.Exception.Message)" -ForegroundColor Red
@@ -95,12 +102,24 @@ function Test-JsonFile {
 # not apply it is suppressed at the function with the reason, so a real finding
 # elsewhere still fails. A settings file that silences whatever happens to be red
 # teaches nothing and cannot distinguish a deliberate exemption from an unexamined one.
+# Refuses rather than installing. A check that reaches for the network to fix its own
+# prerequisites is doing two jobs, and it does the second one invisibly: it mutates the
+# machine of whoever ran it, and it silently upgrades the rule set the gate enforces, so
+# a green tree can turn red with no commit in between. Provisioning belongs to whoever
+# owns the machine -- CI does it in a named step, a person does it once.
+function Assert-CheckModule {
+    param([string]$Name, [version]$Minimum, [string]$Install)
+    $have = Get-Module -ListAvailable $Name | Where-Object Version -ge $Minimum
+    if ($have) { return }
+    Write-Host "   $Name $Minimum or newer is not installed" -ForegroundColor Red
+    Write-Host "     $Install"
+    Failed $Name
+}
+
 function Test-Analyze {
     Announce 'analyze'
-    if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
-        Write-Host '   installing PSScriptAnalyzer' -ForegroundColor DarkGray
-        Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
-    }
+    Assert-CheckModule PSScriptAnalyzer '1.21.0' 'Install-Module PSScriptAnalyzer -Scope CurrentUser'
+    if ($script:failed -contains 'PSScriptAnalyzer') { return }
     Import-Module PSScriptAnalyzer
     $r = @(Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning)
     if ($r.Count) {
@@ -115,10 +134,8 @@ function Test-Analyze {
 
 function Test-Pester {
     Announce 'test'
-    if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge ([version]'5.0.0'))) {
-        Write-Host '   installing Pester' -ForegroundColor DarkGray
-        Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
-    }
+    Assert-CheckModule Pester '5.0.0' 'Install-Module Pester -Scope CurrentUser -SkipPublisherCheck -MinimumVersion 5.0.0'
+    if ($script:failed -contains 'Pester') { return }
     Import-Module Pester -MinimumVersion 5.0.0
     $cfg = New-PesterConfiguration
     $cfg.Run.Path = './tests'

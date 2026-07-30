@@ -66,5 +66,24 @@ jobs:
           path: ~\Documents\PowerShell\Modules
           key: psmodules-${{ runner.os }}-pester5-psscriptanalyzer
 
+      # Provisioning is a NAMED STEP rather than something the gate does to a machine on
+      # its way past. windows-latest ships both today, so this is usually a no-op; it is
+      # here so that a runner image dropping one fails in a step called "dependencies"
+      # instead of somewhere inside a check, and so the gate itself never installs
+      # anything on a contributor's machine or silently moves the analyzer version it
+      # enforces.
+      - name: Ensure check dependencies
+        shell: pwsh
+        run: |
+          $need = @{ PSScriptAnalyzer = '1.21.0'; Pester = '5.0.0' }
+          foreach ($m in $need.GetEnumerator()) {
+            if (Get-Module -ListAvailable $m.Key | Where-Object Version -ge ([version]$m.Value)) {
+              Write-Host "$($m.Key) present"
+            }
+            else {
+              Install-Module $m.Key -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion $m.Value
+            }
+          }
+
       - run: just check
         shell: pwsh
