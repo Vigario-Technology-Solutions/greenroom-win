@@ -49,6 +49,16 @@ function Set-ProjectTrust {
     foreach ($t in $targets) {
         $jsonKey = $t.Replace('\', '\\')
         if ($raw -match [regex]::Escape('"' + $jsonKey + '"')) { continue }
+
+        # An EMPTY projects object takes no trailing comma. Inserting one after the `{`
+        # of `"projects": {}` produces `{ "x": {...},}`, which Node -- the parser that
+        # actually reads this file -- rejects outright, taking Claude Code with it.
+        #
+        # Recomputed each pass, because after the first entry the object is no longer
+        # empty and the second one does need its comma.
+        $isEmpty = $raw.Substring($insertAt) -match '^\s*\}'
+        $comma = if ($isEmpty) { '' } else { ',' }
+
         $entry = @"
 
     "$jsonKey": {
@@ -62,7 +72,7 @@ function Set-ProjectTrust {
       "hasClaudeMdExternalIncludesApproved": false,
       "hasClaudeMdExternalIncludesWarningShown": false,
       "exampleFiles": []
-    },
+    }$comma
 "@
         $raw = $raw.Substring(0, $insertAt) + $entry + $raw.Substring($insertAt)
         $seeded = $true
@@ -73,9 +83,17 @@ function Set-ProjectTrust {
         return $true
     }
 
-    # -AsHashtable because this file can carry keys differing only in case, which the
-    # object parser refuses. The question is whether the result is well-formed JSON.
-    try { $null = $raw | ConvertFrom-Json -AsHashtable }
+    # VALIDATE WITH THE SAME STRICTNESS AS THE PARSER THAT READS THIS FILE.
+    #
+    # ConvertFrom-Json is not it. Measured: it ACCEPTS a trailing comma that Node
+    # rejects, so a guard built on it would have cheerfully written a ~/.claude.json
+    # that Claude Code could not open -- breaking far more than trust seeding, and
+    # doing it while reporting success.
+    #
+    # System.Text.Json refuses trailing commas by default, exactly like Node, and still
+    # accepts a real ~/.claude.json carrying keys that differ only in drive-letter case
+    # (which is why ConvertFrom-Json needed -AsHashtable here in the first place).
+    try { [System.Text.Json.JsonDocument]::Parse($raw).Dispose() }
     catch {
         Write-Warning "refusing to write ~/.claude.json, the result was invalid JSON: $($_.Exception.Message)"
         return $false
