@@ -130,14 +130,34 @@ function Test-JsonFile {
         return
     }
 
+    # A job's `if:` is collected alongside its name, because existing is not enough: a job
+    # that never runs on a pull request can never report on one, and requiring it wedges the
+    # branch permanently. `history` in commit-convention.yml is exactly that job, so the
+    # hazard is present in this repository rather than hypothetical.
     $jobs = @()
+    $ifOf = @{}
     foreach ($f in $wfFiles) {
         $inJobs = $false
+        $current = $null
         foreach ($line in Get-Content $f.FullName) {
             if ($line -match '^jobs:\s*$') { $inJobs = $true; continue }
             if ($inJobs -and $line -match '^\S') { break }
-            if ($inJobs -and $line -match '^  ([A-Za-z0-9_-]+):\s*$') { $jobs += $Matches[1] }
+            if ($inJobs -and $line -match '^  ([A-Za-z0-9_-]+):\s*$') { $current = $Matches[1]; $jobs += $current; continue }
+            if ($inJobs -and $current -and $line -match '^    if:\s*(.+?)\s*$') { $ifOf[$current] = $Matches[1] }
         }
+    }
+
+    # Conservative on purpose. A job is treated as unable to report on a pull request when
+    # its condition names the event and either excludes pull_request outright or never
+    # mentions it. Anything else -- always(), a condition on a label, no condition at all --
+    # is left alone. Being wrong here fails a required context loudly, which is the safe
+    # direction: a false positive is a red check on the pull request that added it, while a
+    # false negative is a branch that can never merge again.
+    function Test-CanReportOnPullRequest([string]$expr) {
+        if (-not $expr) { return $true }
+        if ($expr -match "event_name\s*!=\s*'?pull_request") { return $false }
+        if ($expr -match 'event_name' -and $expr -notmatch 'pull_request') { return $false }
+        return $true
     }
 
     $required = @()
@@ -158,6 +178,15 @@ function Test-JsonFile {
         $missing | ForEach-Object { Write-Host "     $_" }
         Write-Host "   jobs found: $($jobs -join ', ')"
         Failed 'json (required context has no job)'
+        return
+    }
+
+    $unreportable = @($required | Where-Object { -not (Test-CanReportOnPullRequest $ifOf[$_]) })
+    if ($unreportable.Count) {
+        Write-Host "   $payload requires context(s) whose job cannot run on a pull request," -ForegroundColor Red
+        Write-Host "   so they would never report and the branch would wedge:" -ForegroundColor Red
+        $unreportable | ForEach-Object { Write-Host "     $_   (if: $($ifOf[$_]))" }
+        Failed 'json (required context can never report)'
         return
     }
 
