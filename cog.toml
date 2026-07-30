@@ -75,8 +75,28 @@ repository = "greenroom-win"
 # Rehearsed end to end against a throwaway remote before landing: two releases in sequence,
 # each prepending above the previous, with the hand-written 0.1.0 untouched underneath.
 
-# Types describing how the repository is maintained rather than what a user receives
-# produce no release note. The type encodes release impact, not the nature of the change.
+# CHANGELOG MAPPING, MATCHING THE ESTATE. A changelog has to read the same way in two
+# repositories or the type stops meaning one thing, so this mirrors pipetree's
+# `commit_parsers` exactly rather than choosing per repository: entries for `feat`, `fix`
+# and `revert`, nothing for anything else. A repository may ADD a type its domain needs;
+# it may not change what an existing one does to a release.
+#
+# `refactor` and `perf` are omitted for the reason the spec gives rather than by taste: a
+# refactor is behaviour-preserving, so if it shipped something a user can see it was
+# mis-typed and should have been feat or fix. perf is technically observable, and is
+# treated the same because nothing here ships a perf-only release.
+#
+# `style` is configured despite not being in the Angular set, so that historical commits
+# regenerate faithfully if the changelog is ever rebuilt from scratch.
+[commit_types.refactor]
+omit_from_changelog = true
+
+[commit_types.perf]
+omit_from_changelog = true
+
+[commit_types.style]
+omit_from_changelog = true
+
 [commit_types.docs]
 omit_from_changelog = true
 
@@ -91,3 +111,8 @@ omit_from_changelog = true
 
 [commit_types.chore]
 omit_from_changelog = true
+
+# A revert ships a behaviour change from the user's side even though the commit undoes
+# something, so it belongs with the fixes rather than in a section of its own.
+[commit_types.revert]
+changelog_title = "Bug Fixes"
