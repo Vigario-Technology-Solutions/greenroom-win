@@ -47,7 +47,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # cog verify reads one string and cog.toml. No history needed.
           fetch-depth: 1
@@ -80,7 +80,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # cog check walks history, so it needs all of it.
           fetch-depth: 0
