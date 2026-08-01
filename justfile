@@ -48,10 +48,27 @@ analyze:
 test:
     @pwsh -NoProfile -File ./ci/check.ps1 -Phase test
 
-# The two below need cocogitto on PATH (a release binary from
-# github.com/cocogitto/cocogitto). `just check` deliberately does not -- the gate stays
-# runnable with nothing but pwsh, and commit tooling is not something you should have to
-# install to find out whether the tree is sound.
+# The four below need cocogitto on PATH. `just check` deliberately does not -- the gate
+# stays runnable with nothing but pwsh, and commit tooling is not something you should have
+# to install to find out whether the tree is sound.
+#
+# INSTALL THE VERSION CI PINS, not the newest. COG_VERSION in commit-convention.yml and
+# release.yml is what every reported result was produced by; a local cog of a different
+# version can disagree with the gate about the same history. On Windows:
+#
+#   $v = '7.0.0'   # must equal COG_VERSION in .github/workflows/
+#   curl.exe -fsSL "https://github.com/cocogitto/cocogitto/releases/download/$v/cocogitto-$v-x86_64-pc-windows-msvc.tar.gz" -o cog.tar.gz
+#   tar -xzf cog.tar.gz --strip-components=1 -C "$HOME\.local\bin" x86_64-pc-windows-msvc/cog.exe
+#
+# `curl.exe`, not `curl`: Windows PowerShell 5.1 aliases curl to Invoke-WebRequest, which
+# takes none of those flags, so the bare name fails there and works in pwsh 7 -- the worst
+# split for a line someone pastes. `tar` needs no such care; it is a real binary in both.
+#
+# NOT ON WINGET -- no package exists, and the `cog` search is all false positives, so that
+# is a dead end rather than something to keep looking for. The archive is the project's own
+# release artifact. `cargo install cocogitto` is equally official if a Rust toolchain is
+# already present (winget has one, `Rustlang.Rustup`), but it builds from source and pulls
+# in MSVC build tools for a single binary.
 
 # Lint a subject the way CI lints a pull request title: `just verify "feat: add a thing"`.
 verify subject:
@@ -66,7 +83,8 @@ next:
     @cog bump --auto --dry-run
     @cog changelog
 
-# Release. Normally the workflow does this -- it commits, tags and pushes in one atomic
-# operation, and pushing from a laptop bypasses the App identity the ruleset expects.
+# Normally the workflow does this -- it commits, tags and pushes in one atomic operation,
+# and pushing from a laptop bypasses the App identity the ruleset expects.
+# Release by hand, when the workflow cannot.
 release version="--auto":
     @cog bump {{ if version == "--auto" { "--auto" } else { "--version " + version } }} --annotated "greenroom-win {{{{version}}"
