@@ -66,7 +66,7 @@ passed the gate.
 **The cost, stated rather than glossed:** a bypass belongs to the *actor*, not to
 `release.yml`. Any workflow that can mint the App's token can push to `main`
 unreviewed, including one added by a future pull request — the gate checks the
-tree, not what a new workflow reads. Putting `RELEASE_APP_ID` and
+tree, not what a new workflow reads. Putting `RELEASE_APP_CLIENT_ID` and
 `RELEASE_APP_PRIVATE_KEY` behind a GitHub environment with a required reviewer
 closes that, and is the thing that makes the App defensible rather than merely
 convenient.

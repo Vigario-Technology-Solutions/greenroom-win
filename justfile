@@ -69,4 +69,4 @@ next:
 # Release. Normally the workflow does this -- it commits, tags and pushes in one atomic
 # operation, and pushing from a laptop bypasses the App identity the ruleset expects.
 release version="--auto":
-    @cog bump {{ if version == "--auto" { "--auto" } else { "--version " + version } }} --annotated "greenroom-win {{{{version}}}}"
+    @cog bump {{ if version == "--auto" { "--auto" } else { "--version " + version } }} --annotated "greenroom-win {{{{version}}"
