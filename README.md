@@ -168,9 +168,10 @@ Get-GreenroomInstance | Where-Object { $null -eq $_.Window } | Restart-Greenroom
 ```
 
 `Show-`, `Hide-` and `Switch-` return **nothing** — they are `System.Void`, so a pipeline
-ends at them. `Restart-` returns the instance it brought back up, and `Install-` and
-`Uninstall-` return a result object. When you want state after a visibility change, ask
-for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
+ends at them. `Restart-` returns the instance it brought back up, and so does `Install-`
+— except under `-NoStart`, where there is no session to hand back and it returns an
+install result instead. `Uninstall-` returns a result object. When you want state after a
+visibility change, ask for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
 
 Every state-changing command supports `-WhatIf` and `-Confirm`. `-Verbose` explains
 what a command decided and why, including the specific reason a window could not be
