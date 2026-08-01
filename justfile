@@ -60,3 +60,13 @@ verify subject:
 # Lint the whole history, as the post-merge check does.
 lint:
     @cog check
+
+# What the next release would be, and what would be in it. Writes nothing, pushes nothing.
+next:
+    @cog bump --auto --dry-run
+    @cog changelog
+
+# Release. Normally the workflow does this -- it commits, tags and pushes in one atomic
+# operation, and pushing from a laptop bypasses the App identity the ruleset expects.
+release version="--auto":
+    @cog bump {{ if version == "--auto" { "--auto" } else { "--version " + version } }} --annotated "greenroom-win {{{{version}}}}"

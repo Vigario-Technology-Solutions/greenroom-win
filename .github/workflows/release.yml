@@ -1,0 +1,187 @@
+name: Release
+
+# One manual run does the whole release: version into the manifest, changelog, commit,
+# annotated tag, both refs pushed together, GitHub Release. There is no release pull
+# request — the bump lands on main directly, as one commit produced from commits that
+# already passed the gate.
+#
+# WHY THIS NEEDS A GITHUB APP.
+#
+# main refuses direct pushes, so something has to be allowed through. The App is a bypass
+# actor on the ruleset, and the exemption is deliberately narrow in what it is used for:
+# one commit containing only CHANGELOG.md and the manifest. Nothing else in this
+# repository uses the App, and no other workflow reads its secrets.
+#
+# The honest cost, stated because it is real: a ruleset bypass belongs to the ACTOR, not
+# to this workflow. Any workflow that can mint this App's token can push to main
+# unreviewed — including one added by a future pull request, since the gate checks the
+# tree and not what a new workflow reads. Putting RELEASE_APP_CLIENT_ID and
+# RELEASE_APP_PRIVATE_KEY behind a GitHub environment with a required reviewer closes
+# that: a new workflow requesting them stalls until a human approves.
+#
+# WHY NOT A PAT: a PAT is a person's credential with that person's reach, it expires, and
+# it does not survive them. An App installation token is scoped to this repository, lasts
+# an hour, and is auditable as itself.
+#
+# SETUP, once, by the repository owner:
+#   1. Create a GitHub App in the Vigario-Technology-Solutions org.
+#      Repository permissions: Contents: Read and write. Nothing else.
+#   2. Install it on greenroom-win only.
+#   3. Add RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY as secrets — ideally
+#      on an environment with a required reviewer, per the paragraph above. The
+#      Client ID is on the App's settings page and is NOT the App ID: it is the
+#      `Iv23li...` value, not the number beside it.
+#   4. Replace `actor_id: 0` in .github/rulesets/main.json with the App's id and re-apply.
+#      Until then the payload names an actor that does not exist, which is equivalent to
+#      an empty bypass list: safe to apply, and this workflow simply cannot push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, or "auto" to derive it from the commits'
+        required: true
+        default: 'auto'
+        type: string
+      dry-run:
+        description: 'Work out the version and changelog, change nothing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read   # the App token does the writing, not GITHUB_TOKEN
+
+env:
+  COG_VERSION: '7.0.0'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint an App token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          # `client-id`, not `app-id`: the action carries deprecationMessage
+          # "Use 'client-id' instead" on the latter. They are DIFFERENT VALUES --
+          # the App ID is numeric, the Client ID looks like `Iv23li...` -- so this
+          # is not the same secret under a new name.
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # Narrow the minted token below whatever the App was granted. The App should
+          # hold Contents: Read and write and nothing else, but this makes the scope
+          # explicit at the point of use and survives someone widening the App later.
+          permission-contents: write
+
+      - uses: actions/checkout@v7
+        with:
+          # Full history: cog derives the next version from the commits since the last tag
+          # and generates the changelog from the same range.
+          fetch-depth: 0
+          # TAGS ARE NOT OPTIONAL HERE. Without them cog sees an untagged repository and
+          # computes a first release -- generating a changelog from the very first commit,
+          # which is exactly what 0.1.0 was hand-cut to avoid. `fetch-depth: 0` already
+          # brings them; stating it means a later change to the depth cannot quietly
+          # remove them.
+          fetch-tags: true
+          # Checked out WITH the App token, and `persist-credentials` defaults to true, so
+          # the token lands in .git/config and cog's push authenticates as the App -- the
+          # identity the ruleset bypasses. Setting persist-credentials: false here would
+          # break the release at the point of no return, not at checkout.
+          token: ${{ steps.app.outputs.token }}
+          ref: main
+
+      - name: Install cocogitto
+        run: |
+          set -euo pipefail
+          url="https://github.com/cocogitto/cocogitto/releases/download/${COG_VERSION}/cocogitto-${COG_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" | tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          cog --version
+
+      # cog PANICS without a git identity, even when only linting a string:
+      #   called `Result::unwrap()` on an Err value: "config value 'user.name' was not found"
+      # exit 134, a core dump rather than an error. A runner has no identity by default.
+      #
+      # The bump commit is made by the App, so it is attributable to the App rather than to
+      # a person who did not write it.
+      - name: Identify as the release App
+        env:
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          git config user.name  "$APP_SLUG[bot]"
+          git config user.email "$APP_SLUG[bot]@users.noreply.github.com"
+
+      # EVERYTHING THAT CAN FAIL SHOULD FAIL HERE, before anything is created.
+      #
+      # cog check proves history parses; the dry run proves a version can be derived and
+      # that the branch whitelist allows this branch; the tag check catches a re-run of a
+      # release that already happened, which would otherwise fail at the push.
+      - name: Pre-flight
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          cog check
+          if [ "$VERSION" = "auto" ]; then
+            next=$(cog bump --auto --dry-run)
+          else
+            next=$(cog bump --version "$VERSION" --dry-run)
+          fi
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next"
+          if git rev-parse -q --verify "refs/tags/$next" >/dev/null; then
+            echo "::error::$next already exists as a tag"; exit 1
+          fi
+
+      # THE POINT OF NO RETURN, and it is one operation.
+      #
+      # cog bump runs the pre-bump hooks, writes the manifest, commits, creates the
+      # annotated tag, then runs the post-bump hook -- a single `git push --atomic origin
+      # main v<version>`. The server takes both refs or neither, so a failure at any point
+      # leaves main untouched and the whole run re-runnable. A failure BEFORE the push
+      # leaves a commit and tag on a runner that is about to be destroyed, which is the
+      # same thing as nothing having happened.
+      #
+      # Annotated, not lightweight, and deliberately: tag rules block re-pointing an
+      # annotated tag because the new tag object is not a descendant of the old, while a
+      # lightweight tag moved to a descendant commit is a fast-forward and would be
+      # permitted.
+      - name: Release
+        if: ${{ !inputs.dry-run }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$VERSION" = "auto" ]; then
+            cog bump --auto --annotated "greenroom-win {{version}}"
+          else
+            cog bump --version "$VERSION" --annotated "greenroom-win {{version}}"
+          fi
+
+      # After the atomic push this is the only step left, and it is re-runnable by hand
+      # because the tag already exists. Notes come from the changelog section cog just
+      # generated, so the Release page and CHANGELOG.md cannot drift apart -- they are the
+      # same text.
+      - name: Publish the GitHub Release
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ steps.plan.outputs.next }}
+        run: |
+          set -euo pipefail
+          cog changelog --at "$TAG" > /tmp/notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ steps.plan.outputs.next }}"
+            echo
+            if [ "${{ inputs.dry-run }}" = "true" ]; then
+              echo "Dry run — nothing was changed."
+            else
+              echo "Released. The tag, the changelog and ModuleVersion moved together."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
