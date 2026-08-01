@@ -57,8 +57,12 @@ test:
 # version can disagree with the gate about the same history. On Windows:
 #
 #   $v = '7.0.0'   # must equal COG_VERSION in .github/workflows/
-#   curl -fsSL "https://github.com/cocogitto/cocogitto/releases/download/$v/cocogitto-$v-x86_64-pc-windows-msvc.tar.gz" -o cog.tar.gz
+#   curl.exe -fsSL "https://github.com/cocogitto/cocogitto/releases/download/$v/cocogitto-$v-x86_64-pc-windows-msvc.tar.gz" -o cog.tar.gz
 #   tar -xzf cog.tar.gz --strip-components=1 -C "$HOME\.local\bin" x86_64-pc-windows-msvc/cog.exe
+#
+# `curl.exe`, not `curl`: Windows PowerShell 5.1 aliases curl to Invoke-WebRequest, which
+# takes none of those flags, so the bare name fails there and works in pwsh 7 -- the worst
+# split for a line someone pastes. `tar` needs no such care; it is a real binary in both.
 #
 # NOT ON WINGET -- no package exists, and the `cog` search is all false positives, so that
 # is a dead end rather than something to keep looking for. The archive is the project's own
