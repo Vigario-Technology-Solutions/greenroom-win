@@ -1,5 +1,5 @@
 name: Set up a check job
-description: just, plus whichever PowerShell modules the phase needs, with a cache.
+description: just, plus whichever PowerShell modules the phase needs.
 
 # Every check job needs the same two or three lines. Composite actions are what that
 # duplication is for, so the jobs stay one `uses:` and one `run:` and there is one place
