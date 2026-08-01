@@ -19,7 +19,7 @@ in your own values — the template ships none.
 | | |
 |---|---|
 | Windows | 10 or 11 |
-| PowerShell | 7+ |
+| PowerShell | **7.4+** — the manifest declares `PowerShellVersion = '7.4'`, so 7.0–7.3 refuse to import |
 | Windows Terminal | **required** — see [gotchas](gotchas.md#3-do-not-use-conhost-to-dodge-2) |
 | Claude Code CLI | must support `--remote-control [name]` |
 | claude.ai login | full `/login`, not `claude setup-token` |
