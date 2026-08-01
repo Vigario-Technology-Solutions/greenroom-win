@@ -1,21 +1,94 @@
-# cocogitto -- commit convention linting.
+# cocogitto -- commit linting, changelog generation, version bumping and tagging.
 #
 # ONE TOOL, on purpose. The alternative shape was a linter plus a separate changelog
 # generator, and those two can disagree: a commit whose summary wraps onto a second line
 # is accepted by one and silently dropped by the other, so a change vanishes from the
 # release notes behind nothing but a warning. A tool that lints with the same parser it
 # generates from cannot disagree with itself, and that whole class of hole closes by
-# construction -- which is why this file exists before anything releases from it.
+# construction.
 #
 #   cog verify "<subject>"   lints one message   -- CI runs it on the pull request title
 #   cog check                lints history       -- CI runs it on pushes to main
+#   cog bump                 version, changelog, commit, tag, push -- release.yml runs it
 #
-# THIS FILE CARRIES ONLY WHAT LINTING NEEDS. Version bumping, changelog generation and
-# tagging bring `tag_prefix`, `branch_whitelist`, the bump hooks and the `[changelog]`
-# block with them, in the change that introduces the release path. Configuration arrives
-# with the thing that uses it, so a reader can tell what is live from what is aspirational.
+# NOTHING HERE RESTRICTS TYPES. `feat` and `fix` are the only two the specification gives
+# meaning to, and cocogitto enforces its own set already; adding a list would be a local
+# opinion wearing the standard's clothes.
 
 # `cog check` walks history. Merge commits are not authored to a convention and never
 # reach main here anyway -- the ruleset allows squash only -- so they are noise rather
 # than findings.
 ignore_merge_commits = true
+
+# `v` marks a git REF, not a version. The tag carries it; ModuleVersion does not. semver
+# says `v1.2.3` is not a semantic version, and PowerShell's ModuleVersion is
+# [Version]-typed and could not hold a prefix if it wanted to.
+tag_prefix = "v"
+
+# Bumping from anywhere else would tag a commit that is not on the released line.
+# Measured: `cog bump` on another branch refuses with "No patterns matched in [main]".
+branch_whitelist = ["main"]
+
+# THE VERSION LIVES IN THE SOURCE. ModuleVersion in the manifest is the only version slot
+# in this repository -- there is no VERSION file, deliberately, because two slots are what
+# drift. Update-ModuleManifest is PowerShell's own writer for it, so nothing here
+# hand-edits a manifest.
+#
+# Verified before adopting it: it rewrites ModuleVersion, leaves the manifest valid, and
+# preserves the exports and FormatsToProcess. It does restyle FunctionsToExport and Tags,
+# which is 13 lines of diff churn on the first bump and stable afterwards.
+#
+# The staged `git add` matters: cog builds the bump commit from the index, so a hook that
+# edits a file without staging it leaves the change out of the release commit.
+#
+# A hook that fails here aborts the bump BEFORE the commit and tag exist, which is the
+# safe side of the point of no return.
+pre_bump_hooks = [
+    'pwsh -NoProfile -Command "Update-ModuleManifest -Path ./Greenroom/Greenroom.psd1 -ModuleVersion {{version}}"',
+    'git add Greenroom/Greenroom.psd1',
+]
+
+# ONE ATOMIC PUSH, and that is the whole point of this hook.
+#
+# The branch and the tag are separate refs. Pushed separately, a failure between them
+# leaves main carrying a bump commit for a release that has no tag -- a half state nobody
+# can see from either side. `--atomic` makes the server take both refs or neither, so the
+# failure modes that actually exist (a transient fault, a cancelled runner, a re-run where
+# the tag is already present, or a tag ruleset rejecting the tag) all leave main untouched
+# and the whole run re-runnable.
+#
+# `v{{version}}` and not `{{version}}`: the template expands to the VERSION, which is bare,
+# while the thing being pushed is a REF, which carries the prefix. Getting it wrong is
+# silent -- `git push origin 0.2.0` pushes nothing, the tag stays on the runner, and the
+# release exists nowhere. Both surfaces were measured rather than inferred from each other,
+# because they read differently: `cog bump --dry-run` prints the prefixed `v0.2.0` (it is
+# telling you the tag) while the hook template gives the bare `0.2.0` (it is giving you the
+# version).
+post_bump_hooks = [
+    'git push --atomic origin main v{{version}}',
+]
+
+[changelog]
+path = "CHANGELOG.md"
+# `remote` renders commit and author links instead of bare hashes. It needs `repository_url`,
+# which cocogitto builds from the three values below -- it does NOT read the git remote.
+# Measured: with origin set correctly and these omitted, it fails outright with
+# "Variable `repository_url` not found in context", rather than falling back.
+#
+# So the repository name is duplicated here, and this is the only place in the tree that
+# duplicates it. It moves in step with any remote change. A rename is not a breakage --
+# GitHub keeps permanent redirects, so stale links resolve -- but this line is stale until
+# it is updated, and each release regenerates links from whatever it says.
+template = "remote"
+remote = "github.com"
+owner = "Vigario-Technology-Solutions"
+repository = "greenroom-win"
+
+# PREPENDING IS A HARD REQUIREMENT and cocogitto does it natively, by looking for a literal
+# `- - -` separator in CHANGELOG.md. Everything below that line is never touched again,
+# which is what keeps 0.1.0 reading "Initial release." -- a first release has no changes to
+# list, because there is nothing it changed from. 0.1.0 is cut by hand for that reason; the
+# first release this machinery generates is 0.2.0.
+#
+# Without the separator `cog bump` REFUSES rather than clobbering the file, which was
+# verified rather than assumed.
