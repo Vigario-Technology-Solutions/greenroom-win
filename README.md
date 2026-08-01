@@ -43,6 +43,11 @@ in the tree.
 greenroom is a PowerShell module. Installing the **module** and provisioning an
 **instance** are two different things, in that order.
 
+It needs **PowerShell 7.4 or newer** — the oldest release Microsoft still supports, so
+that excludes nothing supported. The manifest declares that floor and
+`CompatiblePSEditions = 'Core'`, so Windows PowerShell 5.1 cannot load it — and says so
+only if it finds the file at all; see [Troubleshooting](#troubleshooting).
+
 ```powershell
 git clone <this repo>
 cd greenroom-win
@@ -290,6 +295,8 @@ Do not trust a green line from the installer for anything it cannot observe.
 | `/rc active` missing | Not logged in, or logged in with a `setup-token` |
 | `cannot resolve the window` | The instance has no usable window record — most often a session started before the record existed. `Restart-GreenroomSession <instance>` creates one |
 | Wrong `claude.exe` picked | Pass `-ClaudeExe` |
+| `Import-Module Greenroom` → "no valid module file was found" | You are in Windows PowerShell 5.1. It searches `Documents\WindowsPowerShell\Modules`; the module installs to `Documents\PowerShell\Modules`. It reads as *missing* rather than *incompatible*. Run `pwsh` |
+| `requires a minimum Windows PowerShell version of '7.4'` | The accurate version of the row above — 5.1 found the manifest by path. Same fix: run `pwsh` |
 
 Restart one instance:
 

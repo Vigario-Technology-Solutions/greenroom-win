@@ -19,10 +19,28 @@ in your own values — the template ships none.
 | | |
 |---|---|
 | Windows | 10 or 11 |
-| PowerShell | 7+ |
+| PowerShell | **7.4+** — every supported release; see below |
 | Windows Terminal | **required** — see [gotchas](gotchas.md#3-do-not-use-conhost-to-dodge-2) |
 | Claude Code CLI | must support `--remote-control [name]` |
 | claude.ai login | full `/login`, not `claude setup-token` |
+
+### PowerShell version
+
+`7.4` is not a preference. It is the **oldest release Microsoft still supports** — 7.3
+ended 08-May-2024 and 7.2 LTS ended 08-Nov-2024, and an end-of-life PowerShell takes no
+security updates. A lower floor would buy compatibility only with runtimes nobody should
+be running, so the manifest declares `PowerShellVersion = '7.4'` and refuses below it.
+
+**This floor has a known expiry: 7.4 and 7.5 both end 10-Nov-2026**, on the same day,
+because .NET 8 and .NET 9 expire together. From then the only supported release is 7.6
+LTS, through 14-Nov-2028. Raise the floor deliberately at that point rather than letting
+it drift into claiming support for a dead runtime. Dates:
+[PowerShell support lifecycle](https://learn.microsoft.com/powershell/scripting/install/powershell-support-lifecycle).
+
+PowerShell 7 is **not part of Windows** and never arrives through Windows Update. Windows
+ships Windows PowerShell 5.1, a separate product on the Windows lifecycle. `pwsh` is
+always an explicit install, so "the host is fully updated" says nothing about whether it
+has PowerShell 7 at all, let alone which version.
 
 ### CLI version
 
