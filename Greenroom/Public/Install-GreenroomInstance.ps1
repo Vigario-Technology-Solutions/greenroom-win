@@ -6,7 +6,6 @@
   Provision a greenroom instance: config, trust, scheduled task, and start it.
 
 .DESCRIPTION
-  Replaces install.ps1.
 
   It provisions an INSTANCE. It does not install the software -- that already happened,
   or you could not be calling this. The script it replaces did both: it copied its own

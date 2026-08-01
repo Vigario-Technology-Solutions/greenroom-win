@@ -6,7 +6,6 @@
   Remove one greenroom instance: its task, its running session and its state.
 
 .DESCRIPTION
-  Replaces uninstall.ps1.
 
   NEVER touches the working directory -- it holds your work. Trust entries in
   ~/.claude.json are also left alone, which is a known gap rather than a decision:

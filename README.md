@@ -10,9 +10,14 @@ stage the moment you want them.
 Several instances run side by side on one host, each with its own working
 directory, its own directory grants, and its own name in the Remote Control UI.
 
-> **Status: 0.1.0, unreleased.** The mechanism is proven single-instance on one
-> host. The two-instance path is implemented and reasoned through but not yet
-> verified end to end.
+> **Status: in development.** Every `0.x` release is initial development in the
+> sense semver means it — anything may change, and the surface is not stable — so
+> a command that exists today may not exist, or may not behave the same way, in
+> the next minor.
+>
+> That is enforced rather than promised: while the major is zero a breaking change
+> bumps the minor, so reaching `1.0.0` cannot happen by accident. It takes someone
+> deciding the surface is worth keeping.
 
 ---
 
@@ -56,7 +61,8 @@ Install-PSResource -Name Greenroom -Repository greenroom-local -Scope CurrentUse
 Or just copy it onto the module path, which is all the above amounts to:
 
 ```powershell
-Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\0.1.0" -Recurse
+$v = (Import-PowerShellDataFile .\Greenroom\Greenroom.psd1).ModuleVersion
+Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\$v" -Recurse
 ```
 
 Either way it then resolves by name, including inside the logon task:
