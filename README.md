@@ -159,13 +159,18 @@ With exactly one instance running, the name can be omitted.
 window exists the whole time and these call `ShowWindow` on it. "Attach" was always a
 euphemism for a visibility toggle.
 
-**Everything emits objects**, so the listing feeds the actions:
+**`Get-GreenroomInstance` emits objects**, so the listing feeds the actions:
 
 ```powershell
 Get-GreenroomInstance | Where-Object { -not $_.Visible } | Show-GreenroomSession
 Get-GreenroomInstance | Where-Object Elevated
 Get-GreenroomInstance | Where-Object { $null -eq $_.Window } | Restart-GreenroomSession
 ```
+
+`Show-`, `Hide-` and `Switch-` return **nothing** — they are `System.Void`, so a pipeline
+ends at them. `Restart-` returns the instance it brought back up, and `Install-` and
+`Uninstall-` return a result object. When you want state after a visibility change, ask
+for it: `Show-GreenroomSession x; Get-GreenroomInstance x`.
 
 Every state-changing command supports `-WhatIf` and `-Confirm`. `-Verbose` explains
 what a command decided and why, including the specific reason a window could not be
