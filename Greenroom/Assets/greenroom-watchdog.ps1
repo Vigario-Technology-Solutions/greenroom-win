@@ -84,7 +84,7 @@ if (-not $acquired) {
 
 $cfgPath = Join-Path $stateDir 'config.json'
 if (-not (Test-Path $cfgPath)) {
-    Log "FATAL: no config at $cfgPath -- run install.ps1 for this instance"
+    Log "FATAL: no config at $cfgPath -- run Install-GreenroomInstance -Name $Instance"
     exit 1
 }
 $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json

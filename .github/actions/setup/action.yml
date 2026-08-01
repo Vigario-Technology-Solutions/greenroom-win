@@ -11,6 +11,13 @@ description: just, plus whichever PowerShell modules the phase needs, with a cac
 #
 # `modules` is a phase's requirement rather than a fixed list, so the manifest, parse and
 # json jobs install nothing at all. They need pwsh and the tree, which every runner has.
+#
+# THERE IS NO CACHE STEP, and there was one until it was measured. windows-latest already
+# ships both modules, so the step below never installs anything, so nothing new ever lands
+# in the module path, so there is nothing to save and every run reported
+# "Cache not found for input keys". It cost two jobs a step apiece and bought nothing. If a
+# runner image ever drops a module the install runs once and takes seconds -- cheaper than
+# a cache that misses on every run and reads as though it were working.
 
 inputs:
   modules:
@@ -24,13 +31,6 @@ runs:
   using: composite
   steps:
     - uses: extractions/setup-just@v4
-
-    - name: Cache PowerShell modules
-      if: inputs.modules != ''
-      uses: actions/cache@v6
-      with:
-        path: ~\Documents\PowerShell\Modules
-        key: psmodules-${{ runner.os }}-${{ inputs.modules }}
 
     # Provisioning is a NAMED STEP, not something a check does to a machine on its way
     # past. It is usually a no-op -- windows-latest ships both modules today -- and it
