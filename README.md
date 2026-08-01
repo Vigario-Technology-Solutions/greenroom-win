@@ -43,7 +43,8 @@ in the tree.
 greenroom is a PowerShell module. Installing the **module** and provisioning an
 **instance** are two different things, in that order.
 
-It needs **PowerShell 7.4 or newer**. The manifest declares that floor and
+It needs **PowerShell 7.4 or newer** — the oldest release Microsoft still supports, so
+that excludes nothing supported. The manifest declares that floor and
 `CompatiblePSEditions = 'Core'`, so Windows PowerShell 5.1 cannot load it — and says so
 only if it finds the file at all; see [Troubleshooting](#troubleshooting).
 
