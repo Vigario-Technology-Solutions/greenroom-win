@@ -23,11 +23,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: extractions/setup-just@v3
+    - uses: extractions/setup-just@v4
 
     - name: Cache PowerShell modules
       if: inputs.modules != ''
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~\Documents\PowerShell\Modules
         key: psmodules-${{ runner.os }}-${{ inputs.modules }}
