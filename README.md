@@ -77,8 +77,9 @@ Install it under the **edition you will manage from** — pwsh 7 and 5.1 read fr
 module directories, so run the matching line above in that edition; both if you use both.
 [Troubleshooting](#troubleshooting) covers an import that still misses.
 
-**From source**, for working on greenroom rather than using it — a local folder as a
-repository, no gallery and no network:
+**From source**, for working on greenroom rather than using it — no gallery and no network.
+A local folder as a repository, **under pwsh 7**: these are PSResourceGet cmdlets, and
+stock 5.1 has PowerShellGet only, so they do not exist there.
 
 ```powershell
 git clone <this repo>; cd greenroom-win
@@ -86,6 +87,15 @@ Get-ChildItem -Recurse | Unblock-File   # if it arrived as an archive
 Register-PSResourceRepository -Name greenroom-local -Uri (Resolve-Path .) -Trusted
 Publish-PSResource -Path .\Greenroom -Repository greenroom-local
 Install-PSResource -Name Greenroom -Repository greenroom-local -Scope CurrentUser
+```
+
+Or copy it onto the module path, which is all the above amounts to and works on either
+edition — drop the line you do not need:
+
+```powershell
+$v = (Import-PowerShellDataFile .\Greenroom\Greenroom.psd1).ModuleVersion
+Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\$v" -Recurse          # pwsh 7
+Copy-Item .\Greenroom "$HOME\Documents\WindowsPowerShell\Modules\Greenroom\$v" -Recurse   # 5.1
 ```
 
 Then provision an instance. `Import-Module` is not needed — the commands auto-load:

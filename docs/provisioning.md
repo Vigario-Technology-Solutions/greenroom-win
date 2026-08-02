@@ -44,7 +44,13 @@ gallery unaided.
 your host, and it applies to **every** package from the gallery — the gallery takes no
 submission and reviews nothing, which is exactly why publishing to it needs no approval.
 Answer the prompt with `-TrustRepository` / `-Force` per install, or mark it trusted for
-everything with `Set-PSResourceRepository -Name PSGallery -Trusted`.
+everything — the cmdlet differs by edition, because stock 5.1 has PowerShellGet and no
+PSResourceGet:
+
+```powershell
+Set-PSResourceRepository -Name PSGallery -Trusted                # pwsh 7
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted     # 5.1
+```
 
 ### PowerShell version
 
@@ -112,7 +118,8 @@ supervised session starts.
 two steps, and only the first belongs to whatever delivered the module:
 
 ```powershell
-Update-PSResource Greenroom     # or however the module got here
+Update-PSResource Greenroom     # pwsh 7   -- or however the module got here
+Update-Module Greenroom         # 5.1      -- PowerShellGet, not PSResourceGet
 Update-GreenroomInstance        # move the instances onto it
 ```
 
