@@ -134,10 +134,8 @@ function Install-GreenroomInstance {
             # something tries and silently fails.
             elevated              = $s.Elevated
             wt                    = $pre.WindowsTerminal
-            # Key kept as 'pwsh' so a module update does not orphan the config of instances
-            # installed before 5.1 support. It holds whichever shell was resolved -- pwsh 7
-            # when present, Windows PowerShell 5.1 otherwise.
-            pwsh                  = $pre.Shell
+            # The shell the session runs under: pwsh 7 when present, else Windows PowerShell 5.1.
+            shell                 = $pre.Shell
             installedUtc          = (Get-Date).ToUniversalTime().ToString('o')
         } | ConvertTo-Json | Set-Content -Path (Join-Path $s.StateDir 'config.json') -Encoding UTF8
 

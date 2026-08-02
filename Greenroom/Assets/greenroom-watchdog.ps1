@@ -90,8 +90,7 @@ if (-not (Test-Path $cfgPath)) {
 $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 
 $wt      = $cfg.wt
-# 'pwsh' key is historical; it holds the resolved shell -- pwsh 7 or Windows PowerShell 5.1.
-$shell   = $cfg.pwsh
+$shell   = $cfg.shell
 $inner   = Join-Path $PSScriptRoot 'greenroom-launch.ps1'
 $POLL_MS = 1000
 
