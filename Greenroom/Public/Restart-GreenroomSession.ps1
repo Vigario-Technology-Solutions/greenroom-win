@@ -103,10 +103,11 @@ function Restart-GreenroomSession {
 
         $esc = [regex]::Escape($Name)
 
+        $shells = 'pwsh.exe', 'powershell.exe'
         $stopped =
-            (Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog') +
-            (Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session')  +
-            (Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher')
+            (Stop-VerifiedProcess -ProcessName $shells       -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog') +
+            (Stop-VerifiedProcess -ProcessName 'claude.exe'  -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session')  +
+            (Stop-VerifiedProcess -ProcessName $shells       -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher')
 
         if ($stopped -eq 0) { Write-Verbose "nothing was running for '$Name'" }
 

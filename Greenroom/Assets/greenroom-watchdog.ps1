@@ -90,7 +90,7 @@ if (-not (Test-Path $cfgPath)) {
 $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 
 $wt      = $cfg.wt
-$pwsh    = $cfg.pwsh
+$shell   = $cfg.shell
 $inner   = Join-Path $PSScriptRoot 'greenroom-launch.ps1'
 $POLL_MS = 1000
 
@@ -259,7 +259,7 @@ function Start-RcSession {
     # down could appear as "new" in the comparison.
     $script:windowsBefore = Get-CascadiaHandleSet
     # -w new forces its own window instead of a tab in an existing terminal.
-    $args_ = @('-w', 'new', $pwsh, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    $args_ = @('-w', 'new', $shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                '-File', $inner, '-Instance', $Instance)
     Start-Process -FilePath $wt -ArgumentList $args_ -WindowStyle Hidden
     Log 'launched WT session (hidden)'

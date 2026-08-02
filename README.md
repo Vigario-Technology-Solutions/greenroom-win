@@ -43,10 +43,12 @@ in the tree.
 greenroom is a PowerShell module. Installing the **module** and provisioning an
 **instance** are two different things, in that order.
 
-It needs **PowerShell 7.4 or newer** — the oldest release Microsoft still supports, so
-that excludes nothing supported. The manifest declares that floor and
-`CompatiblePSEditions = 'Core'`, so Windows PowerShell 5.1 cannot load it — and says so
-only if it finds the file at all; see [Troubleshooting](#troubleshooting).
+It runs on **Windows PowerShell 5.1 or PowerShell 7** — 5.1 ships in-box on every Windows
+host, and pwsh 7 is used in preference when present. The manifest declares
+`PowerShellVersion = '5.1'` and `CompatiblePSEditions = 'Core', 'Desktop'`, so either
+edition can load it. The two editions read from separate module directories, so install
+it for the edition you will manage from — both, if you use both; the steps below show
+each. [Troubleshooting](#troubleshooting) covers an import that still misses.
 
 ```powershell
 git clone <this repo>
@@ -54,8 +56,12 @@ cd greenroom-win
 Get-ChildItem -Recurse | Unblock-File   # if it arrived as an archive
 ```
 
-Then install the module. From a local folder as a repository, which needs no gallery
-and no network:
+Then install the module, into the module path of the **edition you will manage from**:
+pwsh 7 uses `Documents\PowerShell\Modules`, Windows PowerShell 5.1 uses
+`Documents\WindowsPowerShell\Modules`. Install to both if you use both.
+
+From a local folder as a repository, which needs no gallery and no network — it lands in
+the module path of whichever edition you run it under:
 
 ```powershell
 Register-PSResourceRepository -Name greenroom-local -Uri (Resolve-Path .) -Trusted
@@ -63,11 +69,13 @@ Publish-PSResource -Path .\Greenroom -Repository greenroom-local
 Install-PSResource -Name Greenroom -Repository greenroom-local -Scope CurrentUser
 ```
 
-Or just copy it onto the module path, which is all the above amounts to:
+Or just copy it onto the module path, which is all the above amounts to — both editions
+shown, drop the line you do not need:
 
 ```powershell
 $v = (Import-PowerShellDataFile .\Greenroom\Greenroom.psd1).ModuleVersion
-Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\$v" -Recurse
+Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\$v" -Recurse          # pwsh 7
+Copy-Item .\Greenroom "$HOME\Documents\WindowsPowerShell\Modules\Greenroom\$v" -Recurse   # 5.1
 ```
 
 Either way it then resolves by name, including inside the logon task:
@@ -199,12 +207,15 @@ the module path.
 
 ```
 Task Scheduler  (at logon, +delay, Interactive, no elevation)
-  └── wscript.exe greenroom-watchdog.vbs <instance>       ← born hidden, SW_HIDE
-        └── pwsh greenroom-watchdog.ps1 -Instance <name>   ← supervisor, 1s poll
+  └── wscript.exe greenroom-watchdog.vbs <instance>        ← born hidden, SW_HIDE
+        └── <shell> greenroom-watchdog.ps1 -Instance <name> ← supervisor, 1s poll
               └── wt.exe -w new  (hidden)
-                    └── pwsh greenroom-launch.ps1 -Instance <name>
+                    └── <shell> greenroom-launch.ps1 -Instance <name>
                           └── claude.exe --remote-control <name> [--add-dir ...]
 ```
+
+`<shell>` is pwsh 7 where it is installed, otherwise the in-box Windows PowerShell 5.1
+(`powershell.exe`) — resolved per host, pwsh preferred.
 
 | Path | |
 |---|---|
@@ -303,8 +314,7 @@ Do not trust a green line from the installer for anything it cannot observe.
 | `/rc active` missing | Not logged in, or logged in with a `setup-token` |
 | `cannot resolve the window` | The instance has no usable window record — most often a session started before the record existed. `Restart-GreenroomSession <instance>` creates one |
 | Wrong `claude.exe` picked | Pass `-ClaudeExe` |
-| `Import-Module Greenroom` → "no valid module file was found" | You are in Windows PowerShell 5.1. It searches `Documents\WindowsPowerShell\Modules`; the module installs to `Documents\PowerShell\Modules`. It reads as *missing* rather than *incompatible*. Run `pwsh` |
-| `requires a minimum Windows PowerShell version of '7.4'` | The accurate version of the row above — 5.1 found the manifest by path. Same fix: run `pwsh` |
+| `Import-Module Greenroom` → "no valid module file was found" in 5.1 | 5.1 searches `Documents\WindowsPowerShell\Modules`, and the module is only on the pwsh 7 path. Install it to the 5.1 path too (see [Install](#install)), or manage from `pwsh` |
 
 Restart one instance:
 

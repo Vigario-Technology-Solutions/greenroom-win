@@ -20,11 +20,23 @@ BeforeAll {
     $script:Sandbox = Join-Path ([IO.Path]::GetTempPath()) "greenroom-trust-$([guid]::NewGuid())"
     New-Item -ItemType Directory -Path $script:Sandbox -Force | Out-Null
 
-    # Node's strictness is the bar, so assert against a parser that shares it.
-    # System.Text.Json refuses trailing commas by default; ConvertFrom-Json does not.
+    # Node's strictness is the bar, so assert against a parser that shares it -- and one
+    # that EXISTS on the running edition. System.Text.Json is .NET Core only; on Windows
+    # PowerShell 5.1 its absence would fail these tests for the wrong reason, so 5.1 uses
+    # JavaScriptSerializer, which rejects trailing commas just as strictly. (ConvertFrom-Json
+    # is not usable either way -- it ACCEPTS the trailing comma Node rejects.)
     function BeStrictlyValidJson {
         param([string]$Text)
-        try { [System.Text.Json.JsonDocument]::Parse($Text).Dispose(); return $true }
+        try {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                Add-Type -AssemblyName System.Web.Extensions
+                $null = (New-Object System.Web.Script.Serialization.JavaScriptSerializer).DeserializeObject($Text)
+            }
+            else {
+                [System.Text.Json.JsonDocument]::Parse($Text).Dispose()
+            }
+            return $true
+        }
         catch { return $false }
     }
 
@@ -40,6 +52,18 @@ BeforeAll {
             Set-ProjectTrust -Directory $d -BackupDir $b | Out-Null
         }
         Get-Content (Join-Path $home2 '.claude.json') -Raw
+    }
+
+    function Survived {
+        param([string]$Existing, [string]$Directory = 'C:\probe-wd')
+        $home2 = Join-Path $script:Sandbox ([guid]::NewGuid())
+        New-Item -ItemType Directory -Path $home2 -Force | Out-Null
+        Set-Content (Join-Path $home2 '.claude.json') -Value $Existing -NoNewline
+        InModuleScope Greenroom -Parameters @{ h = $home2; d = $Directory } {
+            param($h, $d)
+            $env:USERPROFILE = $h
+            Test-TrustSurvived -Directory $d 3>$null   # 3>$null: swallow the parse Warning, assert the return
+        }
     }
 }
 
@@ -95,5 +119,30 @@ Describe 'Set-ProjectTrust' {
     It 'refuses rather than writing when there is no projects block' {
         $out = Seed -Existing '{ "somethingElse": 1 }'
         $out | Should -Be '{ "somethingElse": 1 }'
+    }
+}
+
+Describe 'Test-TrustSurvived' {
+
+    BeforeEach { $script:RealProfile = $env:USERPROFILE }
+    AfterEach  { $env:USERPROFILE = $script:RealProfile }
+
+    It 'is true when both path forms are trusted' {
+        Survived -Existing '{ "projects": { "C:\\probe-wd": { "hasTrustDialogAccepted": true }, "C:/probe-wd": { "hasTrustDialogAccepted": true } } }' |
+            Should -BeTrue
+    }
+
+    It 'is false when the directory is absent' {
+        Survived -Existing '{ "projects": { "C:\\other": { "hasTrustDialogAccepted": true } } }' | Should -BeFalse
+    }
+
+    It 'never throws -- returns false on malformed JSON' {
+        # A boolean predicate that Install calls without a catch: throwing would abort the
+        # install rather than let it re-seed.
+        Survived -Existing '{ "projects": { oops' | Should -BeFalse
+    }
+
+    It 'returns false on a non-object project entry rather than throwing' {
+        Survived -Existing '{ "projects": { "C:\\probe-wd": "nope", "C:/probe-wd": "nope" } }' | Should -BeFalse
     }
 }

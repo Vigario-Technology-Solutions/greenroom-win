@@ -2,13 +2,7 @@
   "name": "main-protection",
   "target": "branch",
   "enforcement": "active",
-  "bypass_actors": [
-    {
-      "actor_id": 0,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ],
+  "bypass_actors": [],
   "conditions": {
     "ref_name": {
       "include": ["~DEFAULT_BRANCH"],
@@ -37,7 +31,8 @@
           { "context": "parse" },
           { "context": "json" },
           { "context": "analyze" },
-          { "context": "test" },
+          { "context": "test-core" },
+          { "context": "test-desktop" },
           { "context": "pr-title" }
         ]
       }

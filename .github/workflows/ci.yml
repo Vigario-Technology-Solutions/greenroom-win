@@ -1,8 +1,8 @@
 name: CI
 
-# Does the tree hold up. Five jobs, five required contexts, one per thing that can fail
-# for its own reason -- the module's contract, its syntax, the payloads it ships, its
-# static analysis, its behaviour.
+# Does the tree hold up. Six jobs, one per thing that can fail for its own reason -- the
+# module's contract, its syntax, the payloads it ships, its static analysis, and its
+# behaviour on each PowerShell edition: pwsh 7 and in-box Windows PowerShell 5.1.
 #
 # ONE JOB PER CHECK, not per phase-group. A job reports a single status when it ends, so
 # grouping a fast check with a slow one holds the fast answer hostage: measured on this
@@ -108,7 +108,7 @@ jobs:
   #
   # It still does not prove a session starts -- that needs a Claude Code login, and stays
   # a manual measurement on the reference host.
-  test:
+  test-core:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -119,3 +119,29 @@ jobs:
           modules: Pester=5.0.0
       - run: just test
         shell: pwsh
+
+  # The behaviour suite again under WINDOWS POWERSHELL 5.1 -- the in-box edition -- so the
+  # 5.1 floor the manifest now declares cannot rot untested. Only this phase runs on 5.1:
+  # the static contract is edition-independent, and the json phase's parser
+  # (System.Text.Json) is .NET Core only. Importing the module and running every test does
+  # parse every .ps1 under the 5.1 parser AND exercise the runtime, which is the coverage
+  # that matters -- the one place the editions diverge is JSON handling for ~/.claude.json.
+  #
+  # `shell: powershell` is Windows PowerShell 5.1; `pwsh` would be 7. Pester is installed
+  # in a 5.1 step so it lands on the 5.1 module path -- the composite setup action installs
+  # under pwsh, where 5.1 cannot see it. 5.1 ships Pester 3.4.0 and the suite needs 5+.
+  test-desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Ensure Pester 5+ for Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          if (-not (Get-Module -ListAvailable Pester | Where-Object { $_.Version -ge [version]'5.0.0' })) {
+            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+          }
+      - name: test
+        shell: powershell
+        run: .\ci\check.ps1 -Phase test

@@ -134,7 +134,8 @@ function Install-GreenroomInstance {
             # something tries and silently fails.
             elevated              = $s.Elevated
             wt                    = $pre.WindowsTerminal
-            pwsh                  = $pre.Pwsh
+            # The shell the session runs under: pwsh 7 when present, else Windows PowerShell 5.1.
+            shell                 = $pre.Shell
             installedUtc          = (Get-Date).ToUniversalTime().ToString('o')
         } | ConvertTo-Json | Set-Content -Path (Join-Path $s.StateDir 'config.json') -Encoding UTF8
 
