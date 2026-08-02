@@ -272,18 +272,20 @@ grew an `Elevated` column to make it legible.
 
 ## 7. An elevated instance starts blind to Credential Manager
 
-An elevated instance cannot read or write Windows Credential Manager for the first
-minutes of a boot. A tool that depends on it — git over HTTPS through Git Credential
-Manager is the usual one — fails right after a cold boot with
+An elevated instance cannot read or write Windows Credential Manager until something in
+that session triggers a genuine UAC elevation. This is not a delay that clears on its own:
+with nothing ever elevated it never clears — you can wait hours. A tool that depends on the
+store — git over HTTPS through Git Credential Manager is the usual one — fails after a cold
+boot with
 
 ```
 fatal: Unable to persist credentials with the 'wincredman' credential store.
 ```
 
-(Win32 error 1312, "a specified logon session does not exist"), and then starts working
-on its own once you have elevated *anything* that session — Run-as-admin a shell, accept
-one UAC prompt. Nothing greenroom did changed between the failure and the success; the
-session warmed.
+(Win32 error 1312, "a specified logon session does not exist"), and works the instant you
+elevate *anything* in that session — Run-as-admin a shell, accept one UAC prompt. It is the
+elevation that fixes it, not elapsed time: nothing greenroom did changed between the
+failure and the success.
 
 **The credential set a session can read is tied to how its logon was established.** A
 logon made *with a password* — your real Hello/interactive sign-in — gets a Windows
@@ -297,9 +299,9 @@ the same credentials are visible there throughout.
 The warming is the boot's first genuine **UAC elevation**: consenting to a real
 medium→high elevation establishes credential material for the elevated logon session, and
 every elevated process that boot shares one such session, so they all light up at once.
-Measured: cold at +40 s, still cold at +3 min, warm within seconds of the first
-`Run-as-admin`. The instance's own token cannot trigger it — it is *already* elevated, so
-it has nothing to consent to.
+Measured: cold at +40 s, still cold at +3 min with nothing elevated, warm within seconds of
+the first `Run-as-admin`. The instance's own token cannot trigger it — it is *already*
+elevated, so it has nothing to consent to.
 
 The obvious fixes are worse than the problem:
 
@@ -329,10 +331,9 @@ authenticated `git push` from the elevated instance succeeds. Populate the store
 `git-credential-manager github login`; the credential survives reboots because DPAPI uses
 your persistent master key.
 
-This is narrow. It affects only tools that read Windows Credential Manager, only in the
-window before the boot's first elevation. Everything else in the store is personal
-application tokens the instance has no reason to read, and they stay walled off from it,
-which is correct.
+This is narrow. It affects only tools that read Windows Credential Manager, and only until
+that session's first elevation. Everything else in the store is personal application tokens
+the instance has no reason to read, and they stay walled off from it, which is correct.
 
 ---
 
