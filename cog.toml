@@ -43,8 +43,19 @@ branch_whitelist = ["main"]
 #
 # A hook that fails here aborts the bump BEFORE the commit and tag exist, which is the
 # safe side of the point of no return.
+# The hook also writes THAT VERSION'S RELEASE NOTES into the manifest, because
+# PrivateData.PSData.ReleaseNotes is what the gallery renders on a version's page and it is
+# the only thing a browsing user can read to decide whether to upgrade. Shipping it empty,
+# or pointing at a changelog elsewhere, is the package equivalent of "bug fixes and
+# improvements" -- a tooling failure, not a fact about the release. The script refuses to
+# bump rather than publish empty notes, and a published version cannot be deleted, only
+# unlisted, so it has to be right on the way out.
+#
+# It runs cog itself, for the previous-tag..HEAD range: pre-bump hooks run BEFORE the
+# changelog, commit and tag, so `git describe` still names the previous release, which is
+# exactly the range wanted.
 pre_bump_hooks = [
-    'pwsh -NoProfile -Command "Update-ModuleManifest -Path ./Greenroom/Greenroom.psd1 -ModuleVersion {{version}}"',
+    'pwsh -NoProfile -File ./ci/set-manifest-version.ps1 -Version {{version}}',
     'git add Greenroom/Greenroom.psd1',
 ]
 
