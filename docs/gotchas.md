@@ -270,6 +270,72 @@ grew an `Elevated` column to make it legible.
 
 ---
 
+## 7. An elevated instance starts blind to Credential Manager
+
+An elevated instance cannot read or write Windows Credential Manager for the first
+minutes of a boot. A tool that depends on it — git over HTTPS through Git Credential
+Manager is the usual one — fails right after a cold boot with
+
+```
+fatal: Unable to persist credentials with the 'wincredman' credential store.
+```
+
+(Win32 error 1312, "a specified logon session does not exist"), and then starts working
+on its own once you have elevated *anything* that session — Run-as-admin a shell, accept
+one UAC prompt. Nothing greenroom did changed between the failure and the success; the
+session warmed.
+
+**Two gates decide whether a logon session can touch stored credentials, and the
+elevated session fails one.** A session has a Credential Manager credential set only if
+its logon was (A) a non-network type *and* (B) established with a password. `RunLevel
+Highest` builds its elevated token through an S4U (Service-for-User) logon — password-less
+by construction — so gate B is closed and the elevated session has no credential set at
+all. `CredWrite` returning 1312 is not a permission error; there is simply no store to
+write to. The *non-elevated* interactive session — your real Hello/password logon — has
+the set, which is why the same credentials are visible there the entire time.
+
+The warming is the first genuine **UAC/AIS** elevation of the boot: consenting to a real
+medium→high elevation establishes credential material for the elevated logon session, and
+every elevated process that boot shares one such session, so they all light up at once.
+Measured: cold at +40 s, still cold at +3 min, warm within seconds of the first
+`Run-as-admin`. The instance's own token cannot trigger it — it is *already* elevated, so
+it has nothing to consent to.
+
+The obvious fixes are worse than the problem:
+
+- A **password-backed task** (registered with a stored password → Batch logon) is
+  credential-bearing, but a Batch logon is non-interactive: no desktop, so no Remote
+  Control window. It also writes the account password into Credential Manager where any
+  admin can extract it. Credential-bearing and interactive-at-logon are mutually exclusive
+  here.
+- **Disabling UAC** (`EnableLUA=0`) removes the split token and the problem with it, but
+  it is a genuine security downgrade and breaks Store/UWP apps. Not something to require of
+  every host.
+
+**The fix is to stop depending on Credential Manager specifically, not on stored
+credentials in general.** The elevated session fails gate A (the Credential Manager set)
+but passes gate B — DPAPI works in it, because DPAPI's key comes from your profile, which
+the S4U token still carries. So point credential-store-backed tools at a DPAPI-file store.
+For git:
+
+```
+git config --global credential.credentialStore dpapi
+```
+
+Git Credential Manager then encrypts the token to `%USERPROFILE%\.gcm\dpapi_store` with
+your own DPAPI key — a file, no logon-session dependency — and it decrypts cleanly in the
+cold elevated session. Measured: with wincredman empty at +109 s after a cold boot, an
+authenticated `git push` from the elevated instance succeeds. Populate the store once with
+`git-credential-manager github login`; the credential survives reboots because DPAPI uses
+your persistent master key.
+
+This is narrow. It affects only tools that read Windows Credential Manager, only in the
+window before the boot's first elevation. Everything else in the store is personal
+application tokens the instance has no reason to read, and they stay walled off from it,
+which is correct.
+
+---
+
 ## Two smaller ones
 
 **Identify sessions by the instance name on the command line.** The name passed to
