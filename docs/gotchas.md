@@ -303,7 +303,8 @@ Measured: cold at +40 s, still cold at +3 min with nothing elevated, warm within
 the first `Run-as-admin`. The instance's own token cannot trigger it — it is *already*
 elevated, so it has nothing to consent to.
 
-The obvious fixes are worse than the problem:
+There is no clean *general* fix — nothing makes the elevated session credential-bearing
+while it stays interactive:
 
 - A **password-backed task** (registered with a stored password → Batch logon) is
   credential-bearing, but a Batch logon is non-interactive: no desktop, so no Remote
@@ -314,26 +315,29 @@ The obvious fixes are worse than the problem:
   it is a genuine security downgrade and breaks Store/UWP apps. Not something to require of
   every host.
 
-**The fix is to stop depending on Credential Manager specifically, not on stored
-credentials in general.** The elevated session has no Credential Manager set — but DPAPI
-works in it anyway, because DPAPI's key comes from the user profile the S4U token still
-carries, not from a fresh password logon. So point credential-store-backed tools at a
-DPAPI-file store. For git:
+So you do not fix the session — you route the specific tool that needs credentials *around*
+Credential Manager. The blindness itself stays; you just stop depending on the store the
+elevated session cannot reach. For git there are two such routes, and they fix **git**, not
+the blindness:
 
-```
-git config --global credential.credentialStore dpapi
-```
+- **DPAPI store, for git over HTTPS.** `git config --global credential.credentialStore dpapi`
+  makes Git Credential Manager encrypt the token to a file (`%USERPROFILE%\.gcm\dpapi_store`)
+  with your DPAPI key instead of into Credential Manager. DPAPI works in the elevated session
+  even when wincredman does not, because its key comes from the user profile the S4U token
+  still carries. Measured: with wincredman empty at +109 s after a cold boot, an
+  authenticated `git push` from the elevated instance succeeds. Populate it once with
+  `git-credential-manager github login`; it survives reboots, since DPAPI uses your
+  persistent master key.
+- **An SSH remote.** Use `git@github.com:…` instead of `https://…`; git over SSH
+  authenticates with a key and never touches Credential Manager. The catch is that the key
+  must be reachable from the elevated session — a file-based key under `~/.ssh` is, but an
+  agent-backed one (Bitwarden, Pageant) works only if that agent answers the elevated
+  session, which is not a given.
 
-Git Credential Manager then encrypts the token to `%USERPROFILE%\.gcm\dpapi_store` with
-your own DPAPI key — a file, no logon-session dependency — and it decrypts cleanly in the
-cold elevated session. Measured: with wincredman empty at +109 s after a cold boot, an
-authenticated `git push` from the elevated instance succeeds. Populate the store once with
-`git-credential-manager github login`; the credential survives reboots because DPAPI uses
-your persistent master key.
-
-This is narrow. It affects only tools that read Windows Credential Manager, and only until
-that session's first elevation. Everything else in the store is personal application tokens
-the instance has no reason to read, and they stay walled off from it, which is correct.
+Neither touches the underlying blindness. Anything else that reads Windows Credential
+Manager is still blind in that session until its first elevation. That is narrow in practice
+— git is the common case, and the rest of the store is personal application tokens the
+instance has no reason to read — but the remedy is per-tool, not a cure for the session.
 
 ---
 
