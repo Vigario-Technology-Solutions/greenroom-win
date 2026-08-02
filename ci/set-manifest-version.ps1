@@ -55,9 +55,16 @@ if ($LASTEXITCODE -ne 0) { throw "cog changelog failed for range '$range'. Refus
 # Then drop the version-bump commit. It is the release's own bookkeeping ("- (**version**)
 # v0.2.0"), it is never what a reader wants to know, and dropping it is what makes the
 # emptiness check below mean something.
-$lines = @($raw) -split "`r?`n"
-if ($lines.Count -and $lines[0] -match '^##\s') { $lines = $lines[1..($lines.Count - 1)] }
-$lines = $lines | Where-Object { $_ -notmatch '^\-\s+\(\*\*version\*\*\)' }
+# @() around every pipeline, and Select-Object -Skip rather than a range slice. Both are
+# load-bearing in PowerShell and were verified rather than assumed:
+#   - a pipeline yielding ONE item collapses to a [string], and indexing a string returns
+#     CHARACTERS, which silently corrupts the heading pass below
+#   - `1..($n-1)` with $n=1 expands to `1,0` -- DESCENDING -- so the slice keeps the very
+#     line it was meant to drop
+# Neither shows up on a normal release; both would land on an odd one, permanently.
+$lines = @($raw -split "`r?`n")
+if ($lines.Count -and $lines[0] -match '^##\s') { $lines = @($lines | Select-Object -Skip 1) }
+$lines = @($lines | Where-Object { $_ -notmatch '^\-\s+\(\*\*version\*\*\)' })
 
 # WRITTEN FOR THE PERSON READING THE GALLERY PAGE, not for someone with the repository
 # open. Surveyed what comparable modules actually ship in this field: PSReadLine,
@@ -72,9 +79,9 @@ $lines = $lines | Where-Object { $_ -notmatch '^\-\s+\(\*\*version\*\*\)' }
 #
 # Pull request numbers are KEPT, deliberately, as the one deviation. They cost four
 # characters and, beside that link, are enough to find the discussion behind a change.
-$lines = $lines |
+$lines = @($lines |
     ForEach-Object { $_ -replace ' - \([0-9a-f]{7,40}\) - .*$', '' } |
-    ForEach-Object { $_ -replace '^(\-\s+)\(\*\*([^*]+)\*\*\)\s*', '$1$2: ' }
+    ForEach-Object { $_ -replace '^(\-\s+)\(\*\*([^*]+)\*\*\)\s*', '$1$2: ' })
 
 # MEASURED, and the reason this check is not a formality: for a degenerate range -- HEAD
 # already at the previous tag -- cog does not emit nothing. It emits the PREVIOUS release's
@@ -88,11 +95,15 @@ if ($entries.Count -eq 0) {
 }
 
 # Drop any section heading left with no entries under it after that filtering.
+#
+# `Select-Object -Skip` again rather than `($i+1)..($n-1)`: when the heading is the LAST
+# line that range is descending too, and would look backwards through the notes for the
+# entry it is meant to be checking for ahead.
 $kept = @()
 for ($i = 0; $i -lt $lines.Count; $i++) {
     if ($lines[$i] -match '^####\s') {
-        $next = @($lines[($i + 1)..($lines.Count - 1)] | Where-Object { $_ -match '^\S' } | Select-Object -First 1)
-        if (-not $next -or $next[0] -notmatch '^\-\s') { continue }
+        $next = @($lines | Select-Object -Skip ($i + 1) | Where-Object { $_ -match '^\S' } | Select-Object -First 1)
+        if ($next.Count -eq 0 -or $next[0] -notmatch '^\-\s') { continue }
     }
     $kept += $lines[$i]
 }
