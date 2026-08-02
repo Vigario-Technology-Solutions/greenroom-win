@@ -270,6 +270,77 @@ grew an `Elevated` column to make it legible.
 
 ---
 
+## 7. An elevated instance starts blind to Credential Manager
+
+An elevated instance cannot read or write Windows Credential Manager until something in
+that session triggers a genuine UAC elevation. This is not a delay that clears on its own:
+with nothing ever elevated it never clears — you can wait hours. A tool that depends on the
+store — git over HTTPS through Git Credential Manager is the usual one — fails after a cold
+boot with
+
+```
+fatal: Unable to persist credentials with the 'wincredman' credential store.
+```
+
+(Win32 error 1312, "a specified logon session does not exist"), and works the instant you
+elevate *anything* in that session — Run-as-admin a shell, accept one UAC prompt. It is the
+elevation that fixes it, not elapsed time: nothing greenroom did changed between the
+failure and the success.
+
+**The credential set a session can read is tied to how its logon was established.** A
+logon made *with a password* — your real Hello/interactive sign-in — gets a Windows
+Credential Manager credential set; a password-less one does not. `RunLevel Highest` builds
+its elevated token through an S4U (Service-for-User) logon, which is password-less by
+construction, so the elevated session has no credential set at all. `CredWrite` returning
+1312 is not a permission error; there is simply no store to write to. The *non-elevated*
+interactive session — your real sign-in — carries the set the entire time, which is why
+the same credentials are visible there throughout.
+
+The warming is the boot's first genuine **UAC elevation**: consenting to a real
+medium→high elevation establishes credential material for the elevated logon session, and
+every elevated process that boot shares one such session, so they all light up at once.
+Measured: cold at +40 s, still cold at +3 min with nothing elevated, warm within seconds of
+the first `Run-as-admin`. The instance's own token cannot trigger it — it is *already*
+elevated, so it has nothing to consent to.
+
+There is no clean *general* fix — nothing makes the elevated session credential-bearing
+while it stays interactive:
+
+- A **password-backed task** (registered with a stored password → Batch logon) is
+  credential-bearing, but a Batch logon is non-interactive: no desktop, so no Remote
+  Control window. It also writes the account password into Credential Manager where any
+  admin can extract it. Credential-bearing and interactive-at-logon are mutually exclusive
+  here.
+- **Disabling UAC** (`EnableLUA=0`) removes the split token and the problem with it, but
+  it is a genuine security downgrade and breaks Store/UWP apps. Not something to require of
+  every host.
+
+So you do not fix the session — you route the specific tool that needs credentials *around*
+Credential Manager. The blindness itself stays; you just stop depending on the store the
+elevated session cannot reach. For git there are two such routes, and they fix **git**, not
+the blindness:
+
+- **DPAPI store, for git over HTTPS.** `git config --global credential.credentialStore dpapi`
+  makes Git Credential Manager encrypt the token to a file (`%USERPROFILE%\.gcm\dpapi_store`)
+  with your DPAPI key instead of into Credential Manager. DPAPI works in the elevated session
+  even when wincredman does not, because its key comes from the user profile the S4U token
+  still carries. Measured: with wincredman empty at +109 s after a cold boot, an
+  authenticated `git push` from the elevated instance succeeds. Populate it once with
+  `git-credential-manager github login`; it survives reboots, since DPAPI uses your
+  persistent master key.
+- **An SSH remote.** Use `git@github.com:…` instead of `https://…`; git over SSH
+  authenticates with a key and never touches Credential Manager. The catch is that the key
+  must be reachable from the elevated session — a file-based key under `~/.ssh` is, but an
+  agent-backed one (Bitwarden, Pageant) works only if that agent answers the elevated
+  session, which is not a given.
+
+Neither touches the underlying blindness. Anything else that reads Windows Credential
+Manager is still blind in that session until its first elevation. That is narrow in practice
+— git is the common case, and the rest of the store is personal application tokens the
+instance has no reason to read — but the remedy is per-tool, not a cure for the session.
+
+---
+
 ## Two smaller ones
 
 **Identify sessions by the instance name on the command line.** The name passed to

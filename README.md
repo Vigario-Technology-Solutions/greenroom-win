@@ -122,6 +122,14 @@ security posture:
   the shell, not the session.
 - **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
   `Get-GreenroomInstance` is how you tell.
+- **Credential Manager is empty until the boot's first elevation.** The `Highest` task
+  builds its token via a password-less S4U logon, so the elevated session has no Windows
+  Credential Manager credential set until a genuine UAC elevation warms it — a credential-
+  backed tool (git over HTTPS via GCM) fails right after a cold boot with error 1312, then
+  works once you have elevated anything. There is no general fix; you route the affected
+  tool around it — for git, the DPAPI store (`git config --global credential.credentialStore
+  dpapi`) or an SSH remote, neither of which cures the blindness itself.
+  [docs/gotchas.md §7](docs/gotchas.md) has the mechanism and both.
 
 Elevation is inherited on a bare re-run, like grants and the working directory, and
 says so each time. Revoke it explicitly:
