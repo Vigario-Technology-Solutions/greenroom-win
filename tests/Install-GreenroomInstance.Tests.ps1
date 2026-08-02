@@ -224,6 +224,20 @@ Describe 'Model' {
         It 'refuses a model the CLI rejects, before writing anything' {
             # A bad model exits 1 inside a hidden window and crash-loops the instance, so
             # it is caught the same way a CLI without --remote-control is: by running it.
+            #
+            # Resolve-GreenroomPrerequisite is mocked because it runs FIRST and throws
+            # "claude.exe not found" on any host without the CLI -- which is every CI
+            # runner. Without this the test passes only on a developer machine and fails
+            # in CI for a reason that has nothing to do with what it is testing.
+            Mock -ModuleName Greenroom Resolve-GreenroomPrerequisite {
+                [PSCustomObject]@{
+                    WindowsTerminal = 'C:\fake\wt.exe'
+                    Shell           = 'C:\fake\pwsh.exe'
+                    WScript         = 'C:\fake\wscript.exe'
+                    ClaudeExe       = 'C:\fake\claude.exe'
+                    ClaudeVersion   = '0.0.0 (Claude Code)'
+                }
+            }
             Mock -ModuleName Greenroom Assert-ClaudeModel { throw "-Model 'bogus' was rejected by the CLI" }
             Mock -ModuleName Greenroom Register-GreenroomTask { throw 'must not get this far' }
             { Install-GreenroomInstance -Name probe -Model bogus -ErrorAction Stop } | Should -Throw '*rejected by the CLI*'
