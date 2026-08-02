@@ -194,6 +194,11 @@ Describe 'Model' {
 
     BeforeEach {
         Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
+        # Get-ScheduledTask too: a previous config without triggerDelay makes
+        # Resolve-InstallParameter fall back to reading the registered task, so without
+        # this the result depends on whether the host happens to have a greenroom-probe
+        # task -- and it pays a real scheduled-task query per test.
+        Mock -ModuleName Greenroom Get-ScheduledTask { $null }
         Remove-Item (Join-Path $script:StateRoot 'probe\config.json') -ErrorAction SilentlyContinue
     }
 
