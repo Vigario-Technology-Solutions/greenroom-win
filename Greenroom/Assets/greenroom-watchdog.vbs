@@ -17,7 +17,7 @@
 
 Option Explicit
 
-Dim sh, fso, args, instance, here, pwsh, script, cmd
+Dim sh, fso, args, instance, here, shell, script, cmd
 
 Set sh  = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -35,16 +35,22 @@ script = fso.BuildPath(here, "greenroom-watchdog.ps1")
 
 If Not fso.FileExists(script) Then WScript.Quit 3
 
-' The WindowsApps alias is version-independent; fall back to the real path.
-pwsh = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Microsoft\WindowsApps\pwsh.exe"
-If Not fso.FileExists(pwsh) Then
-    pwsh = sh.ExpandEnvironmentStrings("%ProgramFiles%") & "\PowerShell\7\pwsh.exe"
+' Resolve the shell to launch the watchdog with. Prefer pwsh 7 -- the WindowsApps alias
+' is version-independent, then the real install path -- and fall back to the Windows
+' PowerShell 5.1 that ships in-box on every Windows host, so a machine with no pwsh 7
+' installed still starts. greenroom's code runs on both editions.
+shell = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Microsoft\WindowsApps\pwsh.exe"
+If Not fso.FileExists(shell) Then
+    shell = sh.ExpandEnvironmentStrings("%ProgramFiles%") & "\PowerShell\7\pwsh.exe"
 End If
-If Not fso.FileExists(pwsh) Then WScript.Quit 4
+If Not fso.FileExists(shell) Then
+    shell = sh.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"
+End If
+If Not fso.FileExists(shell) Then WScript.Quit 4
 
 sh.CurrentDirectory = sh.ExpandEnvironmentStrings("%USERPROFILE%")
 
-cmd = """" & pwsh & """ -NoLogo -NoProfile -ExecutionPolicy Bypass -File """ & _
+cmd = """" & shell & """ -NoLogo -NoProfile -ExecutionPolicy Bypass -File """ & _
       script & """ -Instance """ & instance & """"
 
 ' 0 = SW_HIDE at creation, False = do not wait
