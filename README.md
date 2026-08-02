@@ -78,7 +78,11 @@ Update-GreenroomInstance                          # after a module upgrade
 Uninstall-GreenroomInstance -Name desktop-admin
 ```
 
-With exactly one instance running, the name can be omitted.
+The name can be omitted **when exactly one instance is installed** — for the visibility
+commands and `Restart-`. The other two differ, deliberately: `Update-GreenroomInstance`
+with no name updates **every** instance whose assets are behind, and `Uninstall-` always
+requires `-Name`, because removing the wrong instance is not a mistake worth making
+convenient.
 
 `Show-` and `Hide-` are approved verbs and they are also literally what happens: the
 window exists the whole time and these call `ShowWindow` on it. "Attach" was always a
@@ -169,7 +173,7 @@ after a kill on the reference host was ~1.4 s.
 
 ## Documentation
 
-| | |
+| Document | What is in it |
 |---|---|
 | [docs/provisioning.md](docs/provisioning.md) | what a host needs and why each item is a requirement — plus elevated instances, multiple instances, and upgrading |
 | [docs/gotchas.md](docs/gotchas.md) | **the part worth reading** — the Windows behaviours that defeated more obvious designs |
