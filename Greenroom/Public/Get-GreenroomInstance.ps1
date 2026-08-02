@@ -69,10 +69,20 @@ function Get-GreenroomInstance {
         }
     }
 
+    $stale = @()
+
     foreach ($s in $sessions) {
         $th  = if ($s.Opaque) { $null } else { Get-TerminalHost $s.Claude }
         $hnd = $null
         $vis = $null
+
+        # The version the task actually runs, which is not necessarily the version loaded
+        # here -- see Get-InstanceAssetVersion. Skipped for an opaque session because its
+        # name is unreadable, and the name is what identifies the task.
+        $asset = if ($s.Opaque) { $null } else { Get-InstanceAssetVersion -Name $s.Instance }
+        if ($asset -and $asset -ne $script:GreenroomModuleVersion) {
+            $stale += [PSCustomObject]@{ Instance = $s.Instance; AssetVersion = $asset }
+        }
 
         if ($th) {
             # -Verbose flows through, so `Get-GreenroomInstance -Verbose` explains every
@@ -93,6 +103,19 @@ function Get-GreenroomInstance {
             Visible     = $vis
             Elevated    = if ($s.Opaque) { $null } else { Test-InstanceElevated -Name $s.Instance }
             Opaque      = $s.Opaque
+            AssetVersion = $asset
         }
+    }
+
+    # Emitted after the objects so it cannot interleave with them, and to the Warning
+    # stream for the same reason as the note above. This is the only signal that a version
+    # bump did not take: the supervisor keeps running the old assets, every version readout
+    # names the new module, and nothing errors. Restart- will not fix it -- it re-runs the
+    # task, and the task is what still names the old version.
+    if ($stale.Count -gt 0) {
+        $which = ($stale | ForEach-Object { "$($_.Instance) runs $($_.AssetVersion)" }) -join '; '
+        Write-Warning ("module $script:GreenroomModuleVersion is loaded but $which. A version bump does not " +
+                       'reach an instance until it is re-registered, because the task names the versioned ' +
+                       'asset path: Install-GreenroomInstance -Name <name> -NoStart, then Restart-GreenroomSession.')
     }
 }

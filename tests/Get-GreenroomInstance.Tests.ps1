@@ -30,6 +30,9 @@ Describe 'Get-GreenroomInstance' {
         Mock -ModuleName Greenroom Resolve-SessionWindow { [IntPtr]::new(4242) }
         Mock -ModuleName Greenroom Test-InstanceElevated { $false }
         Mock -ModuleName Greenroom Test-SelfElevated { $true }
+        # Hermetic: without this the real Get-ScheduledTask runs, and on a host that has a
+        # greenroom task by one of the names above the result would depend on the machine.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { $null }
     }
 
     It 'emits one object per session' {
