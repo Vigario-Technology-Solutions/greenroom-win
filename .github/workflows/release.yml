@@ -1,9 +1,13 @@
 name: Release
 
 # One manual run does the whole release: version into the manifest, changelog, commit,
-# annotated tag, both refs pushed together, GitHub Release. There is no release pull
-# request — the bump lands on main directly, as one commit produced from commits that
-# already passed the gate.
+# annotated tag, both refs pushed together, GitHub Release, and the module published to
+# the PowerShell Gallery. There is no release pull request — the bump lands on main
+# directly, as one commit produced from commits that already passed the gate.
+#
+# THE GALLERY IS THE PRODUCT. Everything before it is bookkeeping: what an operator
+# actually consumes is `Install-PSResource Greenroom`, so a release that tags but does not
+# publish has not shipped.
 #
 # WHY THIS NEEDS A GITHUB APP.
 #
@@ -39,10 +43,15 @@ name: Release
 #      permission, so nothing further is needed.
 #   2. Installed on greenroom-win only.
 #   3. A `release` environment on the repository — required reviewer, limited to the
-#      `main` branch — carrying RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY as
-#      ENVIRONMENT secrets, not repository secrets, per the paragraph above.
+#      `main` branch — carrying RELEASE_APP_CLIENT_ID, RELEASE_APP_PRIVATE_KEY and
+#      PSGALLERY_API_KEY as ENVIRONMENT secrets, not repository secrets, per the
+#      paragraph above.
 #      The Client ID is NOT the App ID. The Client ID is the `Iv23li...` value and goes
 #      in the secret; the App ID is the number beside it and goes in the ruleset.
+#      PSGALLERY_API_KEY comes from powershellgallery.com -> your account -> API Keys.
+#      Scope it to Push for the Greenroom package only; PSGallery keys can be scoped per
+#      package and given an expiry, and a key that can push anything is a key that can
+#      replace anything you own.
 #   4. The App added to `bypass_actors` in .github/rulesets/main.json BY ITS APP ID, and
 #      the ruleset then re-applied — that payload is source of truth, not applied state,
 #      so editing it changes nothing until:
@@ -198,6 +207,45 @@ jobs:
           cog changelog --at "$TAG" > /tmp/notes.md
           gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md --verify-tag
 
+      # Provisioning is a NAMED STEP rather than something the publish does on its way
+      # past, for the same reason the check jobs declare their modules: a runner image that
+      # stops shipping PSResourceGet should fail HERE, in a step about dependencies.
+      - name: Ensure PSResourceGet
+        if: ${{ !inputs.dry-run }}
+        shell: pwsh
+        run: |
+          if (Get-Module Microsoft.PowerShell.PSResourceGet -ListAvailable) {
+            Write-Host "PSResourceGet: present"
+          }
+          else {
+            Write-Host "PSResourceGet: installing"
+            Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -Force -AllowClobber
+          }
+
+      # LAST, and after the tag exists. The manifest only carries the new ModuleVersion
+      # once cog bump has written it, so publishing any earlier would ship the previous
+      # version under the new tag's name.
+      #
+      # This is the one step that cannot be undone by re-running: PSGallery does not allow
+      # a version to be replaced, only deprecated. A FAILED publish is re-runnable by hand
+      # with the same command; a SUCCEEDED one makes a re-run of the whole workflow fail
+      # here, exactly as the pre-flight tag check already does for the tag itself.
+      #
+      # Deliberately not `continue-on-error`: a release whose module never reached the
+      # gallery is a half-release, and it should be loud rather than a green tick hiding a
+      # tag nobody can install.
+      - name: Publish to the PowerShell Gallery
+        if: ${{ !inputs.dry-run }}
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          if (-not $env:PSGALLERY_API_KEY) {
+            throw 'PSGALLERY_API_KEY is not set on the release environment. The tag and GitHub Release already exist; publish by hand with Publish-PSResource once the secret is in place.'
+          }
+          Publish-PSResource -Path ./Greenroom -Repository PSGallery -ApiKey $env:PSGALLERY_API_KEY -ErrorAction Stop
+          Write-Host "published $((Import-PowerShellDataFile ./Greenroom/Greenroom.psd1).ModuleVersion) to PSGallery"
+
       - name: Summary
         run: |
           {
@@ -207,5 +255,12 @@ jobs:
               echo "Dry run — nothing was changed."
             else
               echo "Released. The tag, the changelog and ModuleVersion moved together."
+              echo
+              echo '```powershell'
+              echo "Update-PSResource Greenroom     # or Install-PSResource Greenroom -TrustRepository"
+              echo "Update-GreenroomInstance        # move instances onto it"
+              echo '```'
+              echo
+              echo "PSGallery takes a few minutes to index a new version before it can be installed."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
