@@ -40,11 +40,19 @@ function Read-ClaudeProjectMap {
         Add-Type -AssemblyName System.Web.Extensions
         $js = New-Object System.Web.Script.Serialization.JavaScriptSerializer
         $js.MaxJsonLength = [int]::MaxValue
-        $o = $js.DeserializeObject($Raw)
-        if ($o -and $o.ContainsKey('projects')) { return $o['projects'] }
-        return $null
+        $root = $js.DeserializeObject($Raw)
     }
-    return ($Raw | ConvertFrom-Json -AsHashtable).projects
+    else {
+        $root = $Raw | ConvertFrom-Json -AsHashtable
+    }
+    # Both parsers return an IDictionary for a JSON object (Dictionary on 5.1, Hashtable on
+    # 7). Anything else -- an array, a null, a bare value -- carries no projects map, so
+    # return $null rather than let a .ContainsKey() on a non-dictionary throw.
+    if ($root -is [System.Collections.IDictionary] -and $root.ContainsKey('projects')) {
+        $projects = $root['projects']
+        if ($projects -is [System.Collections.IDictionary]) { return $projects }
+    }
+    return $null
 }
 
 <#
