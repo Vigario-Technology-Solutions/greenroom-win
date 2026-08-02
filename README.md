@@ -129,7 +129,7 @@ security posture:
   works once you have elevated anything. There is no general fix; you route the affected
   tool around it — for git, the DPAPI store (`git config --global credential.credentialStore
   dpapi`) or an SSH remote, neither of which cures the blindness itself.
-  [docs/gotchas.md §7](docs/gotchas.md) has the mechanism and both.
+  [docs/gotchas.md §6](docs/gotchas.md) has the mechanism and both.
 
 Elevation is inherited on a bare re-run, like grants and the working directory, and
 says so each time. Revoke it explicitly:
@@ -138,7 +138,7 @@ says so each time. Revoke it explicitly:
 Install-GreenroomInstance -Name desktop-admin -Elevated:$false
 ```
 
-Background: [docs/gotchas.md §6](docs/gotchas.md).
+Background: [docs/gotchas.md §5](docs/gotchas.md).
 
 **Before you install**, read [docs/provisioning.md](docs/provisioning.md). Two
 prerequisites fail *silently* if unmet — a CLI without `--remote-control`, and

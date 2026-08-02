@@ -9,21 +9,7 @@ reading. The scripts are disposable; these are not.
 
 ---
 
-## 1. Hiding a console from inside the process is too late
-
-The OS creates the window **visible** at creation, and PowerShell needs roughly
-370 ms to boot before any of your code runs — measured as a 367 ms flash of a
-visible terminal at every logon.
-
-Nothing you call from inside the process fixes this, because by the time you can
-call anything the window has already been shown.
-
-**Fix:** never let it be visible. `wscript.exe` is a GUI-subsystem binary, so it
-allocates no console of its own, and `sh.Run(cmd, 0, False)` passes
-`STARTF_USESHOWWINDOW` with `SW_HIDE` in `STARTUPINFO` at process creation. The
-window is *born* hidden, and still exists for a later `ShowWindow`.
-
-## 2. Windows 11 hands consoles off to Windows Terminal
+## 1. Windows 11 hands consoles off to Windows Terminal
 
 Windows Terminal is a separate process parented to the console-handoff broker
 (svchost), not to your launcher. Hiding your own pseudo-console does nothing —
@@ -33,7 +19,7 @@ Worse, `PseudoConsoleWindow` reports `IsWindowVisible = true` at 0×0, so a naiv
 visibility check returns a **false pass**. Any real check must enumerate all
 top-level windows and exclude zero-area ones.
 
-## 3. Do not use conhost to dodge #2
+## 2. Do not use conhost to dodge #1
 
 conhost does no font fallback, and no console-registerable font — Consolas, Lucida
 Console, Cascadia — contains the glyphs the Claude Code TUI draws: ✳ U+2733,
@@ -43,7 +29,7 @@ interface renders as boxes.
 Windows Terminal honours `SW_HIDE` **and** does fallback, which is why it satisfies
 both constraints at once and is a hard requirement rather than a preference.
 
-## 4. Remote Control will not run from a home directory
+## 3. Remote Control will not run from a home directory
 
 The startup trust dialog never persists trust for a home directory, so Remote
 Control never connects and the trust prompt repeats forever. Always use a project
@@ -86,7 +72,7 @@ about everything else; see the marketplace check, which prints exactly what to r
 from `settings.json` rather than editing it. An instance with an empty memory store
 starts fine. It is degraded, not broken, which puts it below that bar.
 
-## 5. Windows Terminal hosts multiple windows in ONE process
+## 4. Windows Terminal hosts multiple windows in ONE process
 
 On a host running two instances, both sessions walk up to the *same*
 `WindowsTerminal.exe` PID, and that PID owns two `CASCADIA_HOSTING` windows.
@@ -143,7 +129,7 @@ read than `Claude Code`. Nothing depends on it.
 > the host process owned only one window — the single-instance case, where the
 > answer is right by luck.
 
-## 6. An elevated session cannot be attached from an unelevated shell
+## 5. An elevated session cannot be attached from an unelevated shell
 
 Elevation is opt-in per instance (`Install-GreenroomInstance -Elevated`), and it is off by
 default — but the reason is operational, not a security posture. **Elevation breaks
@@ -270,7 +256,7 @@ grew an `Elevated` column to make it legible.
 
 ---
 
-## 7. An elevated instance starts blind to Credential Manager
+## 6. An elevated instance starts blind to Credential Manager
 
 An elevated instance cannot read or write Windows Credential Manager until something in
 that session triggers a genuine UAC elevation. This is not a delay that clears on its own:

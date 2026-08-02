@@ -20,7 +20,7 @@ in your own values — the template ships none.
 |---|---|
 | Windows | 10 or 11 |
 | PowerShell | **7.4+** — every supported release; see below |
-| Windows Terminal | **required** — see [gotchas](gotchas.md#3-do-not-use-conhost-to-dodge-2) |
+| Windows Terminal | **required** — see [gotchas](gotchas.md#2-do-not-use-conhost-to-dodge-1) |
 | Claude Code CLI | must support `--remote-control [name]` |
 | claude.ai login | full `/login`, not `claude setup-token` |
 
