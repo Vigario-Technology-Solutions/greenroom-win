@@ -15,25 +15,44 @@ name: Release
 # The honest cost, stated because it is real: a ruleset bypass belongs to the ACTOR, not
 # to this workflow. Any workflow that can mint this App's token can push to main
 # unreviewed — including one added by a future pull request, since the gate checks the
-# tree and not what a new workflow reads. Putting RELEASE_APP_CLIENT_ID and
-# RELEASE_APP_PRIVATE_KEY behind a GitHub environment with a required reviewer closes
-# that: a new workflow requesting them stalls until a human approves.
+# tree and not what a new workflow reads.
+#
+# That is why the secrets live on the `release` ENVIRONMENT rather than repo-wide, and why
+# this job names it below. The environment carries a required reviewer, so a run stalls
+# until a human approves before it can mint the token, and it is limited to `main`, so a
+# modified release.yml dispatched from a branch cannot reach the secrets at all.
+#
+# What that does NOT contain: the bypass is `always`, which GitHub applies to every rule in
+# the ruleset rather than only the pull-request one — so the App could in principle also
+# force-push or delete main, not merely skip review. Splitting main-protection into two
+# rulesets (PR + checks with the bypass, integrity rules without) would scope that down.
+# Judged not worth the second apply step for a solo repository; revisit if that changes.
 #
 # WHY NOT A PAT: a PAT is a person's credential with that person's reach, it expires, and
 # it does not survive them. An App installation token is scoped to this repository, lasts
 # an hour, and is auditable as itself.
 #
-# SETUP, once, by the repository owner:
-#   1. Create a GitHub App in the Vigario-Technology-Solutions org.
-#      Repository permissions: Contents: Read and write. Nothing else.
-#   2. Install it on greenroom-win only.
-#   3. Add RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY as secrets — ideally
-#      on an environment with a required reviewer, per the paragraph above. The
-#      Client ID is on the App's settings page and is NOT the App ID: it is the
-#      `Iv23li...` value, not the number beside it.
-#   4. Replace `actor_id: 0` in .github/rulesets/main.json with the App's id and re-apply.
-#      Until then the payload names an actor that does not exist, which is equivalent to
-#      an empty bypass list: safe to apply, and this workflow simply cannot push.
+# SETUP, done once by the repository owner and recorded here so it can be rebuilt:
+#   1. A GitHub App in the Vigario-Technology-Solutions org — `greenroom-win-release`.
+#      Repository permissions: Contents: Read and write, and nothing else; webhook off.
+#      Contents covers the commit, the tag AND publishing the Release; they are one
+#      permission, so nothing further is needed.
+#   2. Installed on greenroom-win only.
+#   3. A `release` environment on the repository — required reviewer, limited to the
+#      `main` branch — carrying RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY as
+#      ENVIRONMENT secrets, not repository secrets, per the paragraph above.
+#      The Client ID is NOT the App ID. The Client ID is the `Iv23li...` value and goes
+#      in the secret; the App ID is the number beside it and goes in the ruleset.
+#   4. The App added to `bypass_actors` in .github/rulesets/main.json BY ITS APP ID, and
+#      the ruleset then re-applied — that payload is source of truth, not applied state,
+#      so editing it changes nothing until:
+#        gh api repos/<org>/<repo>/rulesets/<id> --method PUT --input .github/rulesets/main.json
+#      Re-apply only after the App is installed: GitHub rejects a bypass actor it cannot
+#      resolve, and the whole PUT fails with a 422.
+#
+# Dry-run first. `dry-run: true` exercises the token mint, the checkout, `cog check` and the
+# version derivation without pushing, so it needs neither the bypass nor the re-apply — it
+# proves everything except the one step that cannot be rehearsed.
 
 on:
   workflow_dispatch:
