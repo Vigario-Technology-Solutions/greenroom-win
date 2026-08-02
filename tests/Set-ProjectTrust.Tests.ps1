@@ -20,11 +20,23 @@ BeforeAll {
     $script:Sandbox = Join-Path ([IO.Path]::GetTempPath()) "greenroom-trust-$([guid]::NewGuid())"
     New-Item -ItemType Directory -Path $script:Sandbox -Force | Out-Null
 
-    # Node's strictness is the bar, so assert against a parser that shares it.
-    # System.Text.Json refuses trailing commas by default; ConvertFrom-Json does not.
+    # Node's strictness is the bar, so assert against a parser that shares it -- and one
+    # that EXISTS on the running edition. System.Text.Json is .NET Core only; on Windows
+    # PowerShell 5.1 its absence would fail these tests for the wrong reason, so 5.1 uses
+    # JavaScriptSerializer, which rejects trailing commas just as strictly. (ConvertFrom-Json
+    # is not usable either way -- it ACCEPTS the trailing comma Node rejects.)
     function BeStrictlyValidJson {
         param([string]$Text)
-        try { [System.Text.Json.JsonDocument]::Parse($Text).Dispose(); return $true }
+        try {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                Add-Type -AssemblyName System.Web.Extensions
+                $null = (New-Object System.Web.Script.Serialization.JavaScriptSerializer).DeserializeObject($Text)
+            }
+            else {
+                [System.Text.Json.JsonDocument]::Parse($Text).Dispose()
+            }
+            return $true
+        }
         catch { return $false }
     }
 

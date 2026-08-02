@@ -38,6 +38,7 @@
           { "context": "json" },
           { "context": "analyze" },
           { "context": "test" },
+          { "context": "test-51" },
           { "context": "pr-title" }
         ]
       }
