@@ -89,9 +89,13 @@ $lines = @($lines |
 # up describing a release that already shipped. Require an actual entry instead.
 $entries = @($lines | Where-Object { $_ -match '^\-\s+\S' })
 if ($entries.Count -eq 0) {
-    throw ("no release notes could be generated for '$range' -- nothing but bookkeeping since " +
-           "$previous. Refusing to bump: a version published with empty or stale notes cannot be " +
-           'fixed afterwards, because the gallery allows unlisting but not deleting.')
+    # Spelled out for BOTH cases. On a first release there is no previous tag, so naming
+    # the range and the tag would interpolate to "for '' ... since ." -- unreadable at the
+    # one moment it gets read, which is while diagnosing a bump that just refused.
+    $scope = if ($previous) { "since $previous ('$range')" } else { 'in the entire history (no previous tag)' }
+    throw ("no release notes could be generated $scope -- nothing there but bookkeeping. Refusing to " +
+           'bump: a version published with empty or stale notes cannot be fixed afterwards, because ' +
+           'the gallery allows unlisting but not deleting.')
 }
 
 # Drop any section heading left with no entries under it after that filtering.
