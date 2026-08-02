@@ -38,7 +38,8 @@ function Resolve-InstallParameter {
         [string]$ClaudeExe,
         [string]$TriggerDelay,
         [string[]]$AdditionalDirectories,
-        [bool]$Elevated
+        [bool]$Elevated,
+        [string]$Model
     )
 
     $stateDir = Join-Path (Get-GreenroomStateRoot) $Name
@@ -136,6 +137,13 @@ function Resolve-InstallParameter {
     }
     if ($claudeInherited) { Write-Verbose "keeping explicitly chosen claude.exe: $ClaudeExe" }
 
+    # Inherits like the rest. Clearing is explicit -- -Model '' returns the instance to
+    # whatever the CLI would choose on its own.
+    if (-not $Bound.ContainsKey('Model') -and $prev -and $prev.model) {
+        $Model = $prev.model
+        Write-Verbose "keeping model from the previous install: $Model"
+    }
+
     if (-not $Bound.ContainsKey('AdditionalDirectories') -and $prev) {
         $prevGrants = @($prev.additionalDirectories) | Where-Object { $_ }
         if ($prevGrants.Count -gt 0) {
@@ -162,5 +170,6 @@ function Resolve-InstallParameter {
         TriggerDelay          = $TriggerDelay
         AdditionalDirectories = $grants
         Elevated              = $Elevated
+        Model                 = $Model
     }
 }

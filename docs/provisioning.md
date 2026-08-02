@@ -188,6 +188,38 @@ holds the old block.
 
 ---
 
+## Model
+
+Each instance can pin the model it launches with:
+
+```powershell
+Install-GreenroomInstance -Name laptop-admin -Model opus
+Restart-GreenroomSession  laptop-admin        # takes effect on the next start
+```
+
+Omitted, it inherits from the previous install like every other parameter; `-Model ''`
+returns the instance to whatever the CLI would choose. It is validated when passed
+explicitly, by running the CLI — a bad value exits 1 inside a hidden window and
+crash-loops the instance, the same failure class as a CLI without `--remote-control`.
+
+**Why this is a launch-line flag rather than a setting.** An instance resumes its
+conversation with `-c`, and a resumed session keeps the model it was saved with — by
+design, so one session's choice cannot move another's. For an always-on instance that
+means the model becomes **sticky**: whatever it last ran is what it keeps, across
+restarts and reboots, indefinitely. A `model` entry in `settings.json` will not dislodge
+it. `--model` on the launch line does, and nothing else reachable from here does.
+
+Prefer an **alias** to a pinned id. `opus` follows the newest of that family;
+`claude-opus-5` stays on that version forever, which is the same trap in a different place.
+
+This sets the model a session **starts** with, not a guarantee for its lifetime. A session
+can be moved afterwards with `/model`, and the CLI can fall back to a different model on
+its own when it flags a message — a long security-flavoured session may find itself on a
+different model than it launched with. greenroom cannot read the live model, so it does
+not report one; `config.json` records what was asked for, not what is running.
+
+---
+
 ## Directory access
 
 Each instance launches with access to its working directory and nothing else.

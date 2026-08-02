@@ -100,6 +100,70 @@ function Resolve-GreenroomPrerequisite {
 }
 
 <#
+  Prove a model value works before it can reach a launch line.
+
+  An unusable --model is FATAL and silent: claude exits 1 at once, the launcher records it,
+  the watchdog never sees a session come up, and the crash-loop guard eventually trips --
+  all inside a hidden window. Same failure class as a CLI without --remote-control, so it
+  is checked the same way, by running the thing.
+
+  MEASURED on the reference host:
+    claude --model definitely-not-a-real-model-xyz --print  -> exit 1, "There's an issue
+                                                               with the selected model"
+    claude --model opus --print                             -> exit 0
+    claude --model <anything> --version                     -> exit 0 EITHER WAY
+
+  That last line is why this costs an API call: --version short-circuits and validates
+  nothing, so there is no free probe. The caller therefore runs this only when -Model was
+  passed EXPLICITLY, never when it was inherited from the previous install.
+#>
+function Assert-ClaudeModel {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ClaudeExe,
+        [Parameter(Mandatory)][string]$Model
+    )
+
+    # PROBED FROM A THROWAWAY DIRECTORY, and that is not tidiness.
+    #
+    # --print writes a transcript into the project store of the CURRENT directory, and
+    # Install- is most naturally run from the instance's own working directory -- the one
+    # store greenroom must not litter, because greenroom-launch.ps1 resumes the NEWEST
+    # transcript there. A probe stub landing in it could become the conversation the
+    # instance comes back to at its next restart.
+    #
+    # Measured: probing from ~/src/greenroom-win left two 11 KB transcripts in that
+    # project store whose only user message was "ok". Probing from a temp directory puts
+    # them under that path's slug instead, which is then removed with it.
+    $probeDir = Join-Path ([IO.Path]::GetTempPath()) "greenroom-model-probe-$([guid]::NewGuid())"
+    New-Item -ItemType Directory -Path $probeDir -Force | Out-Null
+    # Same slug rule the launcher uses: the literal path with every non-alphanumeric
+    # character replaced by a dash.
+    $store = Join-Path $env:USERPROFILE (".claude\projects\" + ($probeDir -replace '[^A-Za-z0-9]', '-'))
+
+    Push-Location $probeDir
+    try {
+        $out  = (& $ClaudeExe --model $Model --print 'ok' 2>&1 | Out-String).Trim()
+        $code = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        Remove-Item $probeDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $store    -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($code -eq 0) {
+        Write-Verbose "model '$Model' accepted by $ClaudeExe"
+        return
+    }
+
+    $first = @($out -split "`r?`n" | Where-Object { $_ }) | Select-Object -First 1
+    throw ("-Model '$Model' was rejected by the CLI, so it is not written and nothing has been " +
+           "changed. A bad model would exit 1 inside a hidden window and crash-loop the instance. " +
+           "The CLI said: $first")
+}
+
+<#
   Warn about host settings that break a supervised session invisibly.
 
   Advisory only -- none of these are fatal, and none are greenroom's to fix. They go to

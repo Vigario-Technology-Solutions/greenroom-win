@@ -112,6 +112,22 @@ $claudeArgs = @('--remote-control', $Instance)
 # resuming a conversation that already carries its own auto-generated title.
 $claudeArgs += @('--name', $Instance)
 
+# ON THE LAUNCH LINE, and it has to be, because this instance resumes with -c below.
+#
+# A resumed session keeps the model it was saved with, deliberately, so that another
+# session's choice cannot move it. That makes an always-on instance STICKY: whatever it
+# was last running is what it keeps, across restarts and reboots, indefinitely -- and a
+# settings-file default will not dislodge it. --model at launch does, and nothing else
+# reachable from here does.
+#
+# It sets the model the session STARTS with, not a guarantee for its lifetime: a session
+# can still be moved afterwards, and the CLI itself can fall back to a different model
+# when it flags a message. greenroom cannot read the live model, so it does not claim to.
+if ($cfg.model) {
+    $claudeArgs += @('--model', $cfg.model)
+    Log "model: $($cfg.model)"
+}
+
 # Directory grants are PER INSTANCE and default to none. An instance launches with
 # access to its working directory and nothing else unless the install granted more.
 if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
