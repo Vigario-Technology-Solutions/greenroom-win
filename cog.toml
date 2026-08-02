@@ -85,10 +85,12 @@ owner = "Vigario-Technology-Solutions"
 repository = "greenroom-win"
 
 # PREPENDING IS A HARD REQUIREMENT and cocogitto does it natively, by looking for a literal
-# `- - -` separator in CHANGELOG.md. Everything below that line is never touched again,
-# which is what keeps 0.1.0 reading "Initial release." -- a first release has no changes to
-# list, because there is nothing it changed from. 0.1.0 is cut by hand for that reason; the
-# first release this machinery generates is 0.2.0.
+# `- - -` separator in CHANGELOG.md. Observed on the v0.2.0 release: everything ABOVE the
+# first separator is preserved verbatim -- that is what keeps the preamble -- and the new
+# section is inserted directly beneath it, ahead of the sections already there, which are
+# left alone. So the hand-cut 0.1.0 at the bottom keeps reading "Initial release.", a first
+# release having no changes to list because there is nothing it changed from. v0.2.0 was
+# the first release this machinery generated.
 #
 # Without the separator `cog bump` REFUSES rather than clobbering the file, which was
 # verified rather than assumed.

@@ -46,15 +46,24 @@ never run cannot be distinguished from one that is pending.
 allow approving your own pull request, so any non-zero count deadlocks a
 single-owner repository outright. Do not "fix" this.
 
-**`bypass_actors` holds one entry, the release App, with `actor_id: 0` until that
-App exists.** A bypass list naming a nonexistent actor is equivalent to an empty
-one — safe to apply, and the release workflow simply cannot push until the real id
-replaces it.
+**`bypass_actors` holds one entry: the release App, by its APP ID** — the number,
+not the `Iv23li...` Client ID that goes in the workflow's secret. **Install the App
+on the repository before applying**, or the whole `PUT` fails with a 422:
+*"Invalid bypass actor"*. GitHub will not accept an actor it cannot resolve, which
+is also why the `actor_id: 0` placeholder this file once carried made the payload
+un-appliable rather than merely inert.
+
+**`bypass_mode: always` bypasses every rule in the ruleset, not just the
+pull-request one** — so the App could in principle force-push or delete `main`, not
+merely skip review. Scoping that down means splitting this into two rulesets, one
+carrying the PR and status-check rules with the bypass and one carrying the
+integrity rules without. Considered and declined for a single-owner repository;
+revisit if more actors ever hold a bypass.
 
 The exemption belongs to the **actor**, not to `release.yml`: anything that can
-mint the App's token can push to `main` unreviewed. Keeping
-`RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY` on an environment with a
-required reviewer is what keeps that narrow.
+mint the App's token can push to `main` unreviewed. That is why
+`RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY` live on the `release`
+environment — required reviewer, limited to `main` — rather than repository-wide.
 
 To push by hand instead, set `enforcement` to `disabled` first — a deliberate,
 visible act rather than a standing exemption.
