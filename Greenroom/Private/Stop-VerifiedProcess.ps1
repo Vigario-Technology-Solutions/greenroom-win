@@ -19,13 +19,18 @@ function Stop-VerifiedProcess {
     [CmdletBinding()]
     [OutputType([int])]
     param(
-        [Parameter(Mandatory)][string]$ProcessName,
+        [Parameter(Mandatory)][string[]]$ProcessName,
         [Parameter(Mandatory)][string]$Pattern,
         [Parameter(Mandatory)][string]$Label
     )
 
     $stopped = 0
-    $candidates = @(Get-CimInstance Win32_Process -Filter "Name='$ProcessName'" -ErrorAction SilentlyContinue -Verbose:$false |
+    # ProcessName may name more than one binary. An instance's watchdog and launcher run
+    # under whatever shell was resolved -- pwsh.exe where pwsh 7 is present, powershell.exe
+    # on stock Windows -- so both have to be matched. The command-line Pattern is the real
+    # discriminator; the name is only a cheap pre-filter.
+    $filter = ($ProcessName | ForEach-Object { "Name='$_'" }) -join ' OR '
+    $candidates = @(Get-CimInstance Win32_Process -Filter $filter -ErrorAction SilentlyContinue -Verbose:$false |
                     Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match $Pattern })
 
     foreach ($p in $candidates) {

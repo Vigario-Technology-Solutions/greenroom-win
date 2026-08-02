@@ -83,9 +83,10 @@ function Uninstall-GreenroomInstance {
             Write-Verbose "no scheduled task named $task"
         }
 
-        $watchdog = Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog'
+        $shells   = 'pwsh.exe', 'powershell.exe'
+        $watchdog = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-watchdog.*-Instance\s+"?' + $esc + '("|\s|$)') -Label 'watchdog'
         $session  = Stop-VerifiedProcess -ProcessName 'claude.exe' -Pattern ('--remote-control\s+"?' + $esc + '("|\s|$)')                 -Label 'session'
-        $launcher = Stop-VerifiedProcess -ProcessName 'pwsh.exe'   -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher'
+        $launcher = Stop-VerifiedProcess -ProcessName $shells      -Pattern ('greenroom-launch.*-Instance\s+"?' + $esc + '("|\s|$)')   -Label 'launcher'
 
         $stateRemoved = $false
         if ($KeepState) {
