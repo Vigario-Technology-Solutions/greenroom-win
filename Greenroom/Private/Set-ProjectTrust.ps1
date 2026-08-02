@@ -168,19 +168,25 @@ function Test-TrustSurvived {
     $file = Join-Path $env:USERPROFILE '.claude.json'
     if (-not (Test-Path $file)) { return $false }
 
-    # A READ failure is environmental -- treat as not-survived and let the caller re-seed.
-    # A PARSE failure is different: a malformed ~/.claude.json is a real anomaly, so
-    # Read-ClaudeProjectMap is allowed to throw rather than be swallowed as "not trusted".
-    # The old blanket `catch { return $false }` did exactly that -- and on 5.1 it swallowed
-    # the -AsHashtable parameter-binding error, reported a healthy file as untrusted, and
-    # drove a spurious re-seed and session restart on every install.
+    # This is a boolean predicate and must never throw: Install-GreenroomInstance calls it
+    # without a try/catch, so an exception here would ABORT the install instead of letting
+    # it re-seed. A READ failure is environmental -- quiet $false, the caller re-seeds. A
+    # PARSE failure is a real anomaly, so it is surfaced (Write-Warning, not silently
+    # swallowed the way the old blanket catch was) and still reported as not-survived. The
+    # 5.1 -AsHashtable bind error that old catch used to hide is gone now that Read-ClaudeProjectMap
+    # is edition-aware.
     $raw = try { Get-Content $file -Raw -ErrorAction Stop } catch { return $false }
-    $projects = Read-ClaudeProjectMap $raw
+    $projects = try { Read-ClaudeProjectMap $raw }
+                catch { Write-Warning "~/.claude.json did not parse while verifying trust for '$Directory': $($_.Exception.Message)"; return $false }
     if (-not $projects) { return $false }
 
+    # Guard the entry as well: a hand-edited project value that is not an object, or is
+    # missing the flag, is "not trusted" rather than a reason to throw indexing into it.
     foreach ($f in (@($Directory.Replace('/', '\'), $Directory.Replace('\', '/')) | Select-Object -Unique)) {
         if (-not $projects.ContainsKey($f)) { return $false }
-        if (-not $projects[$f]['hasTrustDialogAccepted']) { return $false }
+        $entry = $projects[$f]
+        if ($entry -isnot [System.Collections.IDictionary] -or -not $entry.ContainsKey('hasTrustDialogAccepted')) { return $false }
+        if (-not $entry['hasTrustDialogAccepted']) { return $false }
     }
     return $true
 }
