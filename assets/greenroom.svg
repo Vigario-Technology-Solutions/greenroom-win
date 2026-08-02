@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="greenroom">
+  <title>greenroom</title>
+  <!--
+    The backstage standby lamp: green means an instance is waiting, unseen, ready to be
+    called on. Which is what a supervised session is doing.
+
+    Near-black ground on purpose. A light needs darkness to read as LIT rather than merely
+    green, and it is what keeps the mark legible at the ~50px the gallery actually renders.
+    Three masses only, so it survives 16px.
+
+    Source of truth for assets/greenroom.png, which is what IconUri points at because the
+    gallery wants a raster URL. No build step ships for this: the icon changes about never,
+    and the gate deliberately needs nothing but pwsh. It was exported once with
+
+        python -c "import cairosvg; cairosvg.svg2png(url='assets/greenroom.svg',
+                   write_to='assets/greenroom.png', output_width=256, output_height=256)"
+
+    (No double hyphen anywhere in this comment: XML forbids it, which is the same trap
+    already documented in Greenroom.format.ps1xml.)
+  -->
+  <defs>
+    <radialGradient id="halo">
+      <stop offset="0" stop-color="#3BE08A" stop-opacity=".60"/>
+      <stop offset="1" stop-color="#3BE08A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#101310"/>
+  <circle cx="128" cy="128" r="88" fill="url(#halo)"/>
+  <circle cx="128" cy="128" r="68" fill="#14402C"/>
+  <circle cx="128" cy="128" r="44" fill="#3BE08A"/>
+</svg>
