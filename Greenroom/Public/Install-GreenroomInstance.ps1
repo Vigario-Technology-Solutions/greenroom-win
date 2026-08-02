@@ -44,6 +44,18 @@
   or hidden from an unelevated shell, since UIPI blocks the window calls silently.
   Requires an elevated caller. -Elevated:$false revokes.
 
+.PARAMETER Model
+  The model this instance launches with, passed to the CLI as --model. An alias such as
+  `opus` tracks the newest of that family; a pinned id does not. Omitted, it inherits;
+  -Model '' returns the instance to whatever the CLI would choose on its own.
+
+  Passed on the LAUNCH LINE because an instance resumes its conversation, and a resumed
+  session keeps the model it was saved with -- so an always-on instance otherwise stays
+  on whatever it last ran, indefinitely, and a settings-file default will not move it.
+
+  Validated by running the CLI when passed explicitly, because a bad value exits 1 inside
+  a hidden window and crash-loops the instance.
+
 .PARAMETER TriggerDelay
   ISO-8601 logon delay, default PT1M. Stagger it across instances on one host.
 
@@ -65,6 +77,11 @@
 .EXAMPLE
   Install-GreenroomInstance -Name desktop-admin -Elevated:$false
   Revokes elevation. Takes effect when the instance next restarts.
+
+.EXAMPLE
+  Install-GreenroomInstance -Name laptop-admin -Model opus
+  Restart-GreenroomSession laptop-admin
+  Sets the model and makes it take effect. Everything else about the instance is inherited.
 #>
 function Install-GreenroomInstance {
     [CmdletBinding(SupportsShouldProcess)]
@@ -84,6 +101,7 @@ function Install-GreenroomInstance {
 
         [string]$WorkingDirectory,
         [string]$ClaudeExe,
+        [string]$Model,
         [string]$TriggerDelay,
         [string[]]$AdditionalDirectories,
         [switch]$Elevated,
@@ -99,7 +117,7 @@ function Install-GreenroomInstance {
         $s = Resolve-InstallParameter -Name $Name -Bound $PSBoundParameters `
                  -WorkingDirectory $WorkingDirectory -ClaudeExe $ClaudeExe `
                  -TriggerDelay $TriggerDelay -AdditionalDirectories $AdditionalDirectories `
-                 -Elevated $Elevated.IsPresent
+                 -Elevated $Elevated.IsPresent -Model $Model
 
         # MEASURED: registering RunLevel Highest from a non-elevated shell fails with
         # 'Access is denied'. Checked here rather than at registration, which is the last
@@ -113,6 +131,14 @@ function Install-GreenroomInstance {
 
         $pre = Resolve-GreenroomPrerequisite -ClaudeExe $s.ClaudeExe
         Test-GreenroomHostSetting
+
+        # Only for a model passed on THIS run. The probe costs an API call, and a value
+        # that is merely inherited was already proved when it was set -- re-proving it on
+        # every bare re-run would tax the idempotence the rest of this command depends on.
+        # Before ShouldProcess and before anything is written, like every other refusal.
+        if ($PSBoundParameters.ContainsKey('Model') -and $Model) {
+            Assert-ClaudeModel -ClaudeExe $pre.ClaudeExe -Model $Model
+        }
 
         if (-not $PSCmdlet.ShouldProcess($Name, 'Install-GreenroomInstance')) { return }
 
@@ -133,6 +159,9 @@ function Install-GreenroomInstance {
             # recorded rather than re-derived from the task: it has to be known BEFORE
             # something tries and silently fails.
             elevated              = $s.Elevated
+            # Empty means "whatever the CLI picks". Recorded either way so the launcher
+            # never has to distinguish absent from cleared.
+            model                 = $s.Model
             wt                    = $pre.WindowsTerminal
             # The shell the session runs under: pwsh 7 when present, else Windows PowerShell 5.1.
             shell                 = $pre.Shell

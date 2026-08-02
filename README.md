@@ -98,6 +98,7 @@ Install-GreenroomInstance -Name desktop-admin -AdditionalDirectories "$env:USERP
 | `-AdditionalDirectories` | per-instance grants, **default none** |
 | `-TriggerDelay` | logon delay, default `PT1M` |
 | `-ClaudeExe` | override CLI detection |
+| `-Model` | model this instance launches with, e.g. `opus`; inherited on a re-run, `''` clears |
 | `-Elevated` | run the session as admin, **default off** — see below |
 | `-NoTrustSeed`, `-NoStart` | skip those steps |
 | `-WhatIf`, `-Confirm` | as with every state-changing command here |

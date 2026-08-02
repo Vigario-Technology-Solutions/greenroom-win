@@ -189,3 +189,55 @@ Describe 'Install-GreenroomInstance' {
         Should -Invoke -ModuleName Greenroom Register-GreenroomTask -Times 0
     }
 }
+
+Describe 'Model' {
+
+    BeforeEach {
+        Mock -ModuleName Greenroom Get-GreenroomStateRoot { $script:StateRoot }
+        Remove-Item (Join-Path $script:StateRoot 'probe\config.json') -ErrorAction SilentlyContinue
+    }
+
+    It 'inherits the model a previous install recorded' {
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; model = 'opus' }
+        (Resolve).Model | Should -Be 'opus'
+    }
+
+    It 'takes an explicitly passed model over the recorded one' {
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; model = 'opus' }
+        (Resolve -Bound @{ Model = 'sonnet' } -Extra @{ Model = 'sonnet' }).Model | Should -Be 'sonnet'
+    }
+
+    It "clears with -Model '', rather than treating empty as omitted" {
+        # The -ClaudeExe '' precedent: clearing has to be sayable, or a deliberate choice
+        # can be set but never unset.
+        WritePrevConfig @{ workingDirectory = $script:WorkDir; model = 'opus' }
+        (Resolve -Bound @{ Model = '' } -Extra @{ Model = '' }).Model | Should -BeNullOrEmpty
+    }
+
+    It 'is empty when no install ever set one' {
+        WritePrevConfig @{ workingDirectory = $script:WorkDir }
+        (Resolve).Model | Should -BeNullOrEmpty
+    }
+
+    Context 'validation' {
+
+        It 'refuses a model the CLI rejects, before writing anything' {
+            # A bad model exits 1 inside a hidden window and crash-loops the instance, so
+            # it is caught the same way a CLI without --remote-control is: by running it.
+            Mock -ModuleName Greenroom Assert-ClaudeModel { throw "-Model 'bogus' was rejected by the CLI" }
+            Mock -ModuleName Greenroom Register-GreenroomTask { throw 'must not get this far' }
+            { Install-GreenroomInstance -Name probe -Model bogus -ErrorAction Stop } | Should -Throw '*rejected by the CLI*'
+            Should -Invoke -ModuleName Greenroom Register-GreenroomTask -Times 0
+        }
+
+        It 'does not re-probe a model that was merely inherited' {
+            # The probe costs an API call. Paying it on every bare re-run would tax the
+            # idempotence the rest of Install- depends on.
+            WritePrevConfig @{ workingDirectory = $script:WorkDir; model = 'opus' }
+            Mock -ModuleName Greenroom Assert-ClaudeModel { }
+            Mock -ModuleName Greenroom Resolve-GreenroomPrerequisite { throw 'stop here' }
+            { Install-GreenroomInstance -Name probe -ErrorAction Stop } | Should -Throw
+            Should -Invoke -ModuleName Greenroom Assert-ClaudeModel -Times 0
+        }
+    }
+}
