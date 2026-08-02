@@ -84,6 +84,57 @@ supervised session starts.
 
 ---
 
+## Upgrading the module
+
+**Installing a new module version does not move a running instance to it.** Re-register
+every instance after a version bump:
+
+```powershell
+Install-GreenroomInstance -Name <name> -NoStart   # rewrites the task and config.json
+Restart-GreenroomSession  <name>
+```
+
+`Install-` is idempotent and inherits every parameter it is not given, so this is safe to
+re-run and does not need the original arguments.
+
+The reason is that the scheduled task records the **versioned** asset path —
+`…\Modules\Greenroom\<version>\Assets\greenroom-watchdog.vbs` — because that is where the
+module registering it lives. Module versions install side by side, so after staging a new
+one:
+
+- `Import-Module` and `Get-Module` resolve the **newest** version and report it
+- the task keeps launching the **old** version's watchdog and launcher
+- **`Restart-GreenroomSession` does not help.** It re-runs the task, and the task is what
+  still names the old path
+
+Nothing errors, and every version readout agrees with the version you meant to be running.
+This was found on a host where a restart appeared to complete an upgrade and did not.
+
+`Get-GreenroomInstance` reports the running version as `AssetVersion` and warns when it
+differs from the loaded module, so the condition is visible rather than silent:
+
+```
+WARNING: module 0.2.0 is loaded but laptop-admin runs 0.1.0. A version bump does not reach
+an instance until it is re-registered, because the task names the versioned asset path...
+```
+
+`Restart-GreenroomSession` warns for the same reason **before** it stops anything, since a
+restart at that point brings the old version straight back up.
+
+To confirm an upgrade landed, check the task and the live processes rather than the module:
+
+```powershell
+(Get-ScheduledTask greenroom-<name>).Actions.Arguments
+Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='powershell.exe'" |
+    Where-Object CommandLine -match 'greenroom-watchdog' | Select-Object -Expand CommandLine
+```
+
+Removing an old module version while an instance still points at it leaves the task naming
+a file that does not exist: `wscript.exe` exits and no session starts. Re-register first,
+then prune.
+
+---
+
 ## If `defaultShell` is `bash`
 
 This is the one host setting greenroom inspects, and only because getting it wrong

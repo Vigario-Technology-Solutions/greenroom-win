@@ -101,6 +101,17 @@ function Restart-GreenroomSession {
             return
         }
 
+        # Said BEFORE anything is stopped, while it is still actionable. A restart re-runs
+        # the task and the task names the VERSIONED asset path, so with a new module merely
+        # staged this brings the old version straight back up -- silently, and looking
+        # exactly like a successful upgrade. Measured on a host that did precisely that.
+        $asset = Get-InstanceAssetVersion -Name $Name
+        if ($asset -and $asset -ne $script:GreenroomModuleVersion) {
+            Write-Warning ("'$Name' runs $asset assets while module $script:GreenroomModuleVersion is loaded. " +
+                           "Restarting re-runs the task, so it will come back up on $asset. To move it: " +
+                           "Install-GreenroomInstance -Name $Name -NoStart, then Restart-GreenroomSession $Name.")
+        }
+
         $esc = [regex]::Escape($Name)
 
         $shells = 'pwsh.exe', 'powershell.exe'

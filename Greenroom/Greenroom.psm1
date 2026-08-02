@@ -22,6 +22,11 @@ $ErrorActionPreference = 'Stop'
 # PSModulePath being identical under elevation. An explicit path does not.
 $script:GreenroomModuleRoot = $PSScriptRoot
 
+# Read from the manifest rather than inferred from the directory name. The manifest is the
+# only version slot in this repository (see cog.toml), and a module copied onto the module
+# path by hand may sit in a directory that is not named for a version at all.
+$script:GreenroomModuleVersion = [version](Import-PowerShellDataFile (Join-Path $PSScriptRoot 'Greenroom.psd1')).ModuleVersion
+
 # Win32.ps1 first and by name: it defines the P/Invoke surface the window helpers
 # bind against, so ordering here is load-bearing rather than alphabetical luck.
 $private = @(Join-Path $PSScriptRoot 'Private\Win32.ps1')
