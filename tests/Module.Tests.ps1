@@ -31,11 +31,15 @@ Describe 'Greenroom manifest' {
         (Test-ModuleManifest -Path $Manifest).Version | Should -Not -BeNullOrEmpty
     }
 
-    It 'requires PowerShell 7 or later' {
-        # The scripts use pwsh-only behaviour, and ConvertFrom-Json -AsHashtable does
-        # not exist in Windows PowerShell 5.1 at all.
-        (Test-ModuleManifest -Path $Manifest).PowerShellVersion |
-            Should -BeGreaterOrEqual ([version]'7.0')
+    It 'declares a Windows PowerShell 5.1 floor and both editions' {
+        # 5.1 is the floor: it ships in-box on every Windows host, and the module runs on
+        # both editions. The one edition-divergent piece -- parsing ~/.claude.json, which
+        # can hold keys differing only in drive-letter case -- is handled by helpers that
+        # pick JavaScriptSerializer on 5.1 and System.Text.Json / -AsHashtable on 7.
+        $m = Test-ModuleManifest -Path $Manifest
+        $m.PowerShellVersion    | Should -Be ([version]'5.1')
+        $m.CompatiblePSEditions | Should -Contain 'Desktop'
+        $m.CompatiblePSEditions | Should -Contain 'Core'
     }
 
     It 'does not export functions with a wildcard' {

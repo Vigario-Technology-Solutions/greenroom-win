@@ -15,7 +15,7 @@ RootModule = 'Greenroom.psm1'
 ModuleVersion = '0.1.0'
 
 # Supported PSEditions
-CompatiblePSEditions = 'Core'
+CompatiblePSEditions = 'Core', 'Desktop'
 
 # ID used to uniquely identify this module
 GUID = '518689f0-0456-4317-a7e1-daa1eaf66161'
@@ -33,7 +33,7 @@ Copyright = '(c) 2026 Tyler Vigario. AGPL-3.0-or-later.'
 Description = 'Always-on Claude Code Remote Control sessions on Windows. Each instance starts hidden at logon, stays supervised, and is revealed on demand with its full live scrollback. Windows-only: depends on Task Scheduler, Windows Terminal and user32.'
 
 # Minimum version of the PowerShell engine required by this module
-PowerShellVersion = '7.4'
+PowerShellVersion = '5.1'
 
 # Name of the PowerShell host required by this module
 # PowerShellHostName = ''
