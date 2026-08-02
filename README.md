@@ -207,12 +207,15 @@ the module path.
 
 ```
 Task Scheduler  (at logon, +delay, Interactive, no elevation)
-  └── wscript.exe greenroom-watchdog.vbs <instance>       ← born hidden, SW_HIDE
-        └── pwsh greenroom-watchdog.ps1 -Instance <name>   ← supervisor, 1s poll
+  └── wscript.exe greenroom-watchdog.vbs <instance>        ← born hidden, SW_HIDE
+        └── <shell> greenroom-watchdog.ps1 -Instance <name> ← supervisor, 1s poll
               └── wt.exe -w new  (hidden)
-                    └── pwsh greenroom-launch.ps1 -Instance <name>
+                    └── <shell> greenroom-launch.ps1 -Instance <name>
                           └── claude.exe --remote-control <name> [--add-dir ...]
 ```
+
+`<shell>` is pwsh 7 where it is installed, otherwise the in-box Windows PowerShell 5.1
+(`powershell.exe`) — resolved per host, pwsh preferred.
 
 | Path | |
 |---|---|
