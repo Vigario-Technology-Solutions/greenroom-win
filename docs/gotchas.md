@@ -285,16 +285,16 @@ on its own once you have elevated *anything* that session — Run-as-admin a she
 one UAC prompt. Nothing greenroom did changed between the failure and the success; the
 session warmed.
 
-**Two gates decide whether a logon session can touch stored credentials, and the
-elevated session fails one.** A session has a Credential Manager credential set only if
-its logon was (A) a non-network type *and* (B) established with a password. `RunLevel
-Highest` builds its elevated token through an S4U (Service-for-User) logon — password-less
-by construction — so gate B is closed and the elevated session has no credential set at
-all. `CredWrite` returning 1312 is not a permission error; there is simply no store to
-write to. The *non-elevated* interactive session — your real Hello/password logon — has
-the set, which is why the same credentials are visible there the entire time.
+**The credential set a session can read is tied to how its logon was established.** A
+logon made *with a password* — your real Hello/interactive sign-in — gets a Windows
+Credential Manager credential set; a password-less one does not. `RunLevel Highest` builds
+its elevated token through an S4U (Service-for-User) logon, which is password-less by
+construction, so the elevated session has no credential set at all. `CredWrite` returning
+1312 is not a permission error; there is simply no store to write to. The *non-elevated*
+interactive session — your real sign-in — carries the set the entire time, which is why
+the same credentials are visible there throughout.
 
-The warming is the first genuine **UAC/AIS** elevation of the boot: consenting to a real
+The warming is the boot's first genuine **UAC elevation**: consenting to a real
 medium→high elevation establishes credential material for the elevated logon session, and
 every elevated process that boot shares one such session, so they all light up at once.
 Measured: cold at +40 s, still cold at +3 min, warm within seconds of the first
@@ -313,10 +313,10 @@ The obvious fixes are worse than the problem:
   every host.
 
 **The fix is to stop depending on Credential Manager specifically, not on stored
-credentials in general.** The elevated session fails gate A (the Credential Manager set)
-but passes gate B — DPAPI works in it, because DPAPI's key comes from your profile, which
-the S4U token still carries. So point credential-store-backed tools at a DPAPI-file store.
-For git:
+credentials in general.** The elevated session has no Credential Manager set — but DPAPI
+works in it anyway, because DPAPI's key comes from the user profile the S4U token still
+carries, not from a fresh password logon. So point credential-store-backed tools at a
+DPAPI-file store. For git:
 
 ```
 git config --global credential.credentialStore dpapi
