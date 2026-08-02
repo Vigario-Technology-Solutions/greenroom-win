@@ -37,8 +37,8 @@
           { "context": "parse" },
           { "context": "json" },
           { "context": "analyze" },
-          { "context": "test" },
-          { "context": "test-51" },
+          { "context": "test-core" },
+          { "context": "test-desktop" },
           { "context": "pr-title" }
         ]
       }

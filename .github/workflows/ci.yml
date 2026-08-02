@@ -108,7 +108,7 @@ jobs:
   #
   # It still does not prove a session starts -- that needs a Claude Code login, and stays
   # a manual measurement on the reference host.
-  test:
+  test-core:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -129,9 +129,8 @@ jobs:
   #
   # `shell: powershell` is Windows PowerShell 5.1; `pwsh` would be 7. Pester is installed
   # in a 5.1 step so it lands on the 5.1 module path -- the composite setup action installs
-  # under pwsh, where 5.1 cannot see it. 5.1 ships Pester 3.4.0 and the suite needs 5+. The
-  # job name carries no dot: the json phase's job-name scan is [A-Za-z0-9_-]+.
-  test-51:
+  # under pwsh, where 5.1 cannot see it. 5.1 ships Pester 3.4.0 and the suite needs 5+.
+  test-desktop:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
