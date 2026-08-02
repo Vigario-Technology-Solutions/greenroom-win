@@ -86,8 +86,20 @@ supervised session starts.
 
 ## Upgrading the module
 
-**Installing a new module version does not move a running instance to it.** Re-register
-every instance after a version bump:
+**Installing a new module version does not move a running instance to it.** An upgrade is
+two steps, and only the first belongs to whatever delivered the module:
+
+```powershell
+Update-PSResource Greenroom     # or however the module got here
+Update-GreenroomInstance        # move the instances onto it
+```
+
+`Update-GreenroomInstance` re-registers every instance whose assets are behind and restarts
+it. `-WhatIf` reports which are behind without touching them, `-Name` narrows it, and
+`-NoRestart` re-registers without interrupting the running session — the new assets then
+start with the next one.
+
+By hand, per instance, it is:
 
 ```powershell
 Install-GreenroomInstance -Name <name> -NoStart   # rewrites the task and config.json
@@ -95,7 +107,10 @@ Restart-GreenroomSession  <name>
 ```
 
 `Install-` is idempotent and inherits every parameter it is not given, so this is safe to
-re-run and does not need the original arguments.
+re-run and does not need the original arguments. **The task and `config.json` must move
+together** — that is why re-registering is the upgrade step rather than copying assets over
+the old ones — and doing it in one call is what guarantees a new watchdog never reads an
+old config.
 
 The reason is that the scheduled task records the **versioned** asset path —
 `…\Modules\Greenroom\<version>\Assets\greenroom-watchdog.vbs` — because that is where the
