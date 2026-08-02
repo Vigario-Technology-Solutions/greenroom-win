@@ -107,7 +107,11 @@ PrivateData = @{
         ProjectUri = 'https://github.com/Vigario-Technology-Solutions/greenroom-win'
 
         # A URL to an icon representing this module.
-        # IconUri = ''
+        # Served from main rather than a tag, deliberately: the gallery fetches this URL
+        # live, so an icon can be corrected later and every already-published version
+        # picks it up. The cost is that moving or renaming the file breaks the icon on
+        # every version at once, so it does not move.
+        IconUri = 'https://raw.githubusercontent.com/Vigario-Technology-Solutions/greenroom-win/main/assets/greenroom.png'
 
         # ReleaseNotes of this module
         # ReleaseNotes = ''
