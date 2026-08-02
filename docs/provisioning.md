@@ -249,6 +249,58 @@ not report one; `config.json` records what was asked for, not what is running.
 
 ---
 
+## Elevated instances
+
+`-Elevated` registers the task with `RunLevel Highest`, so the session runs with a full
+admin token and no UAC prompt. **Requires an elevated installer** — registering
+`RunLevel Highest` is refused from a normal shell.
+
+It is off by default because it changes how the instance is operated, not as a security
+posture:
+
+- **Show and Hide prompt for elevation.** UIPI stops a normal shell from showing or hiding
+  an elevated window, and the calls fail by returning `false` rather than erroring — so the
+  command re-launches itself through UAC and the elevated copy does the work. Pass
+  `-NoElevate` to get a plain refusal instead.
+- **`Get-GreenroomInstance` has a blind spot unless it is run elevated too.**
+  `Win32_Process.CommandLine` reads as NULL across integrity levels, and that is how
+  instances are named — so from an ordinary shell an elevated session shows as `Opaque`
+  with no name. Run it elevated and the blind spot is gone; it belongs to the shell, not
+  the session.
+- **Nothing on screen distinguishes an elevated session** — no prompt, no badge.
+  `Get-GreenroomInstance` is how you tell.
+- **Credential Manager is empty until the boot's first elevation.** The `Highest` task
+  builds its token via a password-less S4U logon, so the elevated session has no Windows
+  Credential Manager credential set until a genuine UAC elevation warms it — a
+  credential-backed tool (git over HTTPS via GCM) fails right after a cold boot with error
+  1312, then works once you have elevated anything. There is no general fix; you route the
+  affected tool around it — for git, the DPAPI store
+  (`git config --global credential.credentialStore dpapi`) or an SSH remote, neither of
+  which cures the blindness itself. [gotchas.md §6](gotchas.md) has the mechanism and both.
+
+Elevation is inherited on a bare re-run, like grants and the working directory, and says so
+each time. Revoke it explicitly:
+
+```powershell
+Install-GreenroomInstance -Name desktop-admin -Elevated:$false
+```
+
+Background: [gotchas.md §5](gotchas.md).
+
+---
+
+## Several instances on one host
+
+```powershell
+Install-GreenroomInstance -Name desktop-admin -TriggerDelay PT1M
+Install-GreenroomInstance -Name render-admin  -TriggerDelay PT2M -WorkingDirectory D:\render-admin
+```
+
+Stagger the delays so they do not race at logon. Each instance gets its own working
+directory, its own grants, and its own name in the Remote Control UI.
+
+---
+
 ## Directory access
 
 Each instance launches with access to its working directory and nothing else.

@@ -1,0 +1,13 @@
+# Line endings, stated rather than left to whatever each clone has configured.
+#
+# `text=auto` is what this repository was already doing by accident: LF in the index,
+# native in the working tree. Measured before writing this -- 54 of 57 tracked files were
+# `i/lf w/crlf`. Saying it here changes nothing about the current tree and stops a
+# contributor whose core.autocrlf differs from committing CRLF into the index, which is
+# the failure this prevents.
+#
+# Deliberately NOT `eol=lf`: that would rewrite every working copy on Windows for no gain.
+* text=auto
+
+# Binary, so git never tries to diff or normalise it.
+*.png binary
