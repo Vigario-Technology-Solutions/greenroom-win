@@ -59,6 +59,23 @@ $lines = @($raw) -split "`r?`n"
 if ($lines.Count -and $lines[0] -match '^##\s') { $lines = $lines[1..($lines.Count - 1)] }
 $lines = $lines | Where-Object { $_ -notmatch '^\-\s+\(\*\*version\*\*\)' }
 
+# WRITTEN FOR THE PERSON READING THE GALLERY PAGE, not for someone with the repository
+# open. Surveyed what comparable modules actually ship in this field: PSReadLine,
+# PSScriptAnalyzer and ImportExcel ship it EMPTY; Pester and dbatools ship a bare link;
+# Az.Accounts -- the best of them, and the most installed module there is -- ships plain
+# readable bullets. None of the six carry commit hashes or author names.
+#
+# So drop both. The gallery renders this close to plain text, which makes a hash
+# unclickable noise, and per-line attribution answers a question the reader is not asking:
+# they want to know what changed, and the git detail is one click away in the full
+# changelog linked at the end.
+#
+# Pull request numbers are KEPT, deliberately, as the one deviation. They cost four
+# characters and, beside that link, are enough to find the discussion behind a change.
+$lines = $lines |
+    ForEach-Object { $_ -replace ' - \([0-9a-f]{7,40}\) - .*$', '' } |
+    ForEach-Object { $_ -replace '^(\-\s+)\(\*\*([^*]+)\*\*\)\s*', '$1$2: ' }
+
 # MEASURED, and the reason this check is not a formality: for a degenerate range -- HEAD
 # already at the previous tag -- cog does not emit nothing. It emits the PREVIOUS release's
 # section, chore commit and all, so a naive "is it empty" test passes and the manifest ends
