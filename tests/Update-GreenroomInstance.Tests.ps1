@@ -104,6 +104,20 @@ Describe 'Update-GreenroomInstance' {
         "$e" | Should -Match 'alpha'
     }
 
+    It 'carries on with NO -ErrorAction supplied, which is the real default' {
+        # The test above passes -ErrorAction SilentlyContinue, and that alone made it pass:
+        # the module sets $ErrorActionPreference = 'Stop', so a bare Write-Error is
+        # TERMINATING and aborted the loop at the first failure. Every later instance was
+        # left on the old version. This is the case that caught it.
+        Mock -ModuleName Greenroom Get-InstanceAssetVersion { [version]'0.0.1' }
+        Mock -ModuleName Greenroom Install-GreenroomInstance {
+            if ($Name -eq 'alpha') { throw 'elevation declined' }
+        }
+        Update-GreenroomInstance 2>$null
+        Should -Invoke -ModuleName Greenroom Install-GreenroomInstance -Times 1 -Exactly `
+            -ParameterFilter { $Name -eq 'beta' }
+    }
+
     It 'does not restart an instance whose re-registration failed' {
         Mock -ModuleName Greenroom Install-GreenroomInstance { throw 'nope' }
         Update-GreenroomInstance -ErrorAction SilentlyContinue

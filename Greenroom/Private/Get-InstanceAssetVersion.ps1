@@ -40,25 +40,3 @@ function Get-InstanceAssetVersion {
     }
     return $null
 }
-
-<#
-  The instances whose task runs a different version than the module loaded in this session.
-
-  Takes the names to check, so the caller decides the scope and this stays cheap: one
-  scheduled-task read per name.
-#>
-function Get-StaleAssetInstance {
-    [CmdletBinding()]
-    param([string[]]$Name = @())
-
-    foreach ($n in ($Name | Where-Object { $_ } | Select-Object -Unique)) {
-        $asset = Get-InstanceAssetVersion -Name $n
-        if ($asset -and $asset -ne $script:GreenroomModuleVersion) {
-            [PSCustomObject]@{
-                Instance     = $n
-                AssetVersion = $asset
-                Module       = $script:GreenroomModuleVersion
-            }
-        }
-    }
-}

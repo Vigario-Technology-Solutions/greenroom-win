@@ -119,9 +119,14 @@ function Update-GreenroomInstance {
 
         try { Install-GreenroomInstance -Name $t.Instance -NoStart -Confirm:$false | Out-Null }
         catch {
-            # Non-terminating: one instance refusing (declined elevation, a missing CLI)
-            # must not strand the rest of the host on the old version.
-            Write-Error "re-registering '$($t.Instance)' failed, it stays on $from -- $($_.Exception.Message)"
+            # -ErrorAction Continue ON THE Write-Error ITSELF, and it is load-bearing. The
+            # module sets $ErrorActionPreference = 'Stop', which functions here inherit, so
+            # a bare Write-Error is TERMINATING and would abort the loop at the first
+            # failure -- stranding every later instance on the old version, which is the
+            # opposite of the intent. Measured: without this, a throw on the first instance
+            # stopped the second from being re-registered at all.
+            Write-Error -ErrorAction Continue -Message (
+                "re-registering '$($t.Instance)' failed, it stays on $from -- $($_.Exception.Message)")
             continue
         }
 
