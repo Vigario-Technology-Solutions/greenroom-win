@@ -124,8 +124,35 @@ function Assert-ClaudeModel {
         [Parameter(Mandatory)][string]$Model
     )
 
-    $out = (& $ClaudeExe --model $Model --print 'ok' 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -eq 0) {
+    # PROBED FROM A THROWAWAY DIRECTORY, and that is not tidiness.
+    #
+    # --print writes a transcript into the project store of the CURRENT directory, and
+    # Install- is most naturally run from the instance's own working directory -- the one
+    # store greenroom must not litter, because greenroom-launch.ps1 resumes the NEWEST
+    # transcript there. A probe stub landing in it could become the conversation the
+    # instance comes back to at its next restart.
+    #
+    # Measured: probing from ~/src/greenroom-win left two 11 KB transcripts in that
+    # project store whose only user message was "ok". Probing from a temp directory puts
+    # them under that path's slug instead, which is then removed with it.
+    $probeDir = Join-Path ([IO.Path]::GetTempPath()) "greenroom-model-probe-$([guid]::NewGuid())"
+    New-Item -ItemType Directory -Path $probeDir -Force | Out-Null
+    # Same slug rule the launcher uses: the literal path with every non-alphanumeric
+    # character replaced by a dash.
+    $store = Join-Path $env:USERPROFILE (".claude\projects\" + ($probeDir -replace '[^A-Za-z0-9]', '-'))
+
+    Push-Location $probeDir
+    try {
+        $out  = (& $ClaudeExe --model $Model --print 'ok' 2>&1 | Out-String).Trim()
+        $code = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        Remove-Item $probeDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $store    -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($code -eq 0) {
         Write-Verbose "model '$Model' accepted by $ClaudeExe"
         return
     }

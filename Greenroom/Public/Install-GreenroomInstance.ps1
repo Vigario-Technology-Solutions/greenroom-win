@@ -54,7 +54,10 @@
   on whatever it last ran, indefinitely, and a settings-file default will not move it.
 
   Validated by running the CLI when passed explicitly, because a bad value exits 1 inside
-  a hidden window and crash-loops the instance.
+  a hidden window and crash-loops the instance. That probe is a real request, and it runs
+  under -WhatIf too -- deliberately, so -WhatIf cannot report an install that would then
+  fail. It writes nothing: it runs from a throwaway directory that is removed with the
+  transcript it produces.
 
 .PARAMETER TriggerDelay
   ISO-8601 logon delay, default PT1M. Stagger it across instances on one host.
