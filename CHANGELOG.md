@@ -6,6 +6,18 @@ Everything below the separator is written once and never regenerated. 0.1.0 is t
 because a first release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.2.0](https://github.com/Vigario-Technology-Solutions/greenroom-win/compare/373c4116811162a190f90c4cc090becf6264b786..v0.2.0) - 2026-08-02
+#### Features
+- support Windows PowerShell 5.1 so greenroom runs on stock Windows (#31) - ([3eb7cf3](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/3eb7cf3b6e30c8c05541e45d400f5e824dbc6abe)) - Tyler Vigario, Claude Opus 4.8
+#### Documentation
+- cut the console-hide entry — a design detail, not a gotcha (#30) - ([2c0ae28](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/2c0ae289d6a53bcbd0b4445bd2c4507aee0e4e39)) - Tyler Vigario, Claude Opus 5
+- elevated instances stay blind to Credential Manager until the first UAC elevation (#29) - ([373c411](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/373c4116811162a190f90c4cc090becf6264b786)) - Tyler Vigario, Claude Opus 5
+#### Continuous Integration
+- add the release app as a ruleset bypass actor (#32) - ([b6e866a](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/b6e866a519fd0d6146a68e6072a0677a5cf30b2f)) - Tyler Vigario, Claude Opus 4.8
+- run the release job in the gated release environment (#33) - ([111bc5d](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/111bc5da6502c898549bb5ce39b34d5a034c6253)) - Tyler Vigario, Claude Opus 4.8
+
+- - -
+
 
 ## 0.1.0
 
