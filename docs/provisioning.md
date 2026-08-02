@@ -20,9 +20,31 @@ in your own values — the template ships none.
 |---|---|
 | Windows | 10 or 11 |
 | PowerShell | **5.1+** — in-box Windows PowerShell suffices; pwsh 7 preferred, see below |
+| NuGet provider | **5.1 only, once per host** — `Install-PackageProvider NuGet -Force -Scope CurrentUser` |
 | Windows Terminal | **required** — see [gotchas](gotchas.md#2-do-not-use-conhost-to-dodge-1) |
 | Claude Code CLI | must support `--remote-control [name]` |
 | claude.ai login | full `/login`, not `claude setup-token` |
+
+### The NuGet provider, on 5.1 only
+
+Measured on a stock host: **Windows PowerShell 5.1 ships PowerShellGet 1.0.0.1 but no
+NuGet provider**, and PSGallery is registered `Untrusted`. So its first gallery install
+tries to bootstrap the provider, which prompts — and in a non-interactive shell the prompt
+has nothing to prompt, so it fails with `Exception calling "ShouldContinue"` rather than
+anything that names the cause. Install the provider once and it never recurs:
+
+```powershell
+Install-PackageProvider NuGet -Force -Scope CurrentUser
+```
+
+pwsh 7 needs none of this: it ships `Microsoft.PowerShell.PSResourceGet` and reaches the
+gallery unaided.
+
+`Untrusted` is the shipped default for PSGallery on both editions, not something set on
+your host, and it applies to **every** package from the gallery — the gallery takes no
+submission and reviews nothing, which is exactly why publishing to it needs no approval.
+Answer the prompt with `-TrustRepository` / `-Force` per install, or mark it trusted for
+everything with `Set-PSResourceRepository -Name PSGallery -Trusted`.
 
 ### PowerShell version
 

@@ -46,42 +46,51 @@ greenroom is a PowerShell module. Installing the **module** and provisioning an
 It runs on **Windows PowerShell 5.1 or PowerShell 7** — 5.1 ships in-box on every Windows
 host, and pwsh 7 is used in preference when present. The manifest declares
 `PowerShellVersion = '5.1'` and `CompatiblePSEditions = 'Core', 'Desktop'`, so either
-edition can load it. The two editions read from separate module directories, so install
-it for the edition you will manage from — both, if you use both; the steps below show
-each. [Troubleshooting](#troubleshooting) covers an import that still misses.
+edition can load it.
+
+From the [PowerShell Gallery](https://www.powershellgallery.com/packages/Greenroom). No
+clone, and nothing to keep on disk:
 
 ```powershell
-git clone <this repo>
-cd greenroom-win
-Get-ChildItem -Recurse | Unblock-File   # if it arrived as an archive
+Install-PSResource Greenroom -TrustRepository          # pwsh 7
 ```
 
-Then install the module, into the module path of the **edition you will manage from**:
-pwsh 7 uses `Documents\PowerShell\Modules`, Windows PowerShell 5.1 uses
-`Documents\WindowsPowerShell\Modules`. Install to both if you use both.
+```powershell
+Install-PackageProvider NuGet -Force -Scope CurrentUser   # 5.1, once per host
+Install-Module Greenroom -Scope CurrentUser -Force        # 5.1
+```
 
-From a local folder as a repository, which needs no gallery and no network — it lands in
-the module path of whichever edition you run it under:
+The extra 5.1 line is not greenroom's: Windows PowerShell ships without the NuGet
+provider, so its first gallery install has to fetch it. pwsh 7 needs nothing.
+
+`-TrustRepository` / `-Force` answers the prompt PSGallery raises for **every** package,
+because the gallery takes no submission and reviews nothing, so Windows ships it
+untrusted. Mark it trusted permanently if you prefer — knowing that it applies to every
+package from the gallery, not only this one:
 
 ```powershell
+Set-PSResourceRepository -Name PSGallery -Trusted                # pwsh 7
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted     # 5.1
+```
+
+Install it under the **edition you will manage from** — pwsh 7 and 5.1 read from separate
+module directories, so run the matching line above in that edition; both if you use both.
+[Troubleshooting](#troubleshooting) covers an import that still misses.
+
+**From source**, for working on greenroom rather than using it — a local folder as a
+repository, no gallery and no network:
+
+```powershell
+git clone <this repo>; cd greenroom-win
+Get-ChildItem -Recurse | Unblock-File   # if it arrived as an archive
 Register-PSResourceRepository -Name greenroom-local -Uri (Resolve-Path .) -Trusted
 Publish-PSResource -Path .\Greenroom -Repository greenroom-local
 Install-PSResource -Name Greenroom -Repository greenroom-local -Scope CurrentUser
 ```
 
-Or just copy it onto the module path, which is all the above amounts to — both editions
-shown, drop the line you do not need:
+Then provision an instance. `Import-Module` is not needed — the commands auto-load:
 
 ```powershell
-$v = (Import-PowerShellDataFile .\Greenroom\Greenroom.psd1).ModuleVersion
-Copy-Item .\Greenroom "$HOME\Documents\PowerShell\Modules\Greenroom\$v" -Recurse          # pwsh 7
-Copy-Item .\Greenroom "$HOME\Documents\WindowsPowerShell\Modules\Greenroom\$v" -Recurse   # 5.1
-```
-
-Either way it then resolves by name, including inside the logon task:
-
-```powershell
-Import-Module Greenroom
 Install-GreenroomInstance -Name desktop-admin
 ```
 
