@@ -1,6 +1,52 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Tyler Vigario
 
+# The two JSON stacks meet here, and nowhere else in the module. They are mutually
+# exclusive across editions: JavaScriptSerializer is absent from .NET Core (pwsh 7), and
+# -AsHashtable / System.Text.Json are absent from .NET Framework (Windows PowerShell 5.1).
+# ~/.claude.json can carry keys differing only in drive-letter case, so the plain object
+# parser (ConvertFrom-Json without -AsHashtable) is unusable on both. Every edition
+# divergence in the module lives in these two helpers.
+
+<#
+  Is $Raw well-formed JSON, judged as strictly as the parser that actually reads the file?
+  Both editions reject a trailing comma, which Node -- and so Claude Code -- reject.
+#>
+function Test-ClaudeJsonValid {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Raw)
+    try {
+        if ($PSVersionTable.PSEdition -eq 'Desktop') {
+            Add-Type -AssemblyName System.Web.Extensions
+            $js = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+            $js.MaxJsonLength = [int]::MaxValue
+            $null = $js.DeserializeObject($Raw)
+        }
+        else {
+            [System.Text.Json.JsonDocument]::Parse($Raw).Dispose()
+        }
+        $true
+    }
+    catch { $false }
+}
+
+<#
+  Parse ~/.claude.json's "projects" object into an indexable map, or $null if absent.
+  Case-sensitive, and the two slash forms read as distinct keys -- verified on both
+  editions. Throws on malformed JSON, which the caller must not confuse with "trust absent".
+#>
+function Read-ClaudeProjectMap {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Raw)
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        Add-Type -AssemblyName System.Web.Extensions
+        $js = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+        $js.MaxJsonLength = [int]::MaxValue
+        $o = $js.DeserializeObject($Raw)
+        if ($o -and $o.ContainsKey('projects')) { return $o['projects'] }
+        return $null
+    }
+    return ($Raw | ConvertFrom-Json -AsHashtable).projects
+}
+
 <#
   Seed Claude Code's trust for a working directory, so the session does not stop at a
   modal trust dialog inside a window nobody can see.
@@ -83,19 +129,13 @@ function Set-ProjectTrust {
         return $true
     }
 
-    # VALIDATE WITH THE SAME STRICTNESS AS THE PARSER THAT READS THIS FILE.
-    #
-    # ConvertFrom-Json is not it. Measured: it ACCEPTS a trailing comma that Node
-    # rejects, so a guard built on it would have cheerfully written a ~/.claude.json
-    # that Claude Code could not open -- breaking far more than trust seeding, and
-    # doing it while reporting success.
-    #
-    # System.Text.Json refuses trailing commas by default, exactly like Node, and still
-    # accepts a real ~/.claude.json carrying keys that differ only in drive-letter case
-    # (which is why ConvertFrom-Json needed -AsHashtable here in the first place).
-    try { [System.Text.Json.JsonDocument]::Parse($raw).Dispose() }
-    catch {
-        Write-Warning "refusing to write ~/.claude.json, the result was invalid JSON: $($_.Exception.Message)"
+    # VALIDATE WITH THE SAME STRICTNESS AS THE PARSER THAT READS THIS FILE. Node -- and so
+    # Claude Code -- reject a trailing comma, which a bad insert could produce; Test-ClaudeJsonValid
+    # rejects it too, on both editions. (Plain ConvertFrom-Json is not a safe guard: on pwsh 7
+    # it ACCEPTS the trailing comma Node rejects, and on 5.1 it dies on the drive-letter-case
+    # keys this file can carry. The edition-aware helper is strict and case-tolerant on both.)
+    if (-not (Test-ClaudeJsonValid $raw)) {
+        Write-Warning 'refusing to write ~/.claude.json -- the seeded result was not valid JSON'
         return $false
     }
 
@@ -120,12 +160,19 @@ function Test-TrustSurvived {
     $file = Join-Path $env:USERPROFILE '.claude.json'
     if (-not (Test-Path $file)) { return $false }
 
-    try { $j = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable } catch { return $false }
-    if (-not $j.projects) { return $false }
+    # A READ failure is environmental -- treat as not-survived and let the caller re-seed.
+    # A PARSE failure is different: a malformed ~/.claude.json is a real anomaly, so
+    # Read-ClaudeProjectMap is allowed to throw rather than be swallowed as "not trusted".
+    # The old blanket `catch { return $false }` did exactly that -- and on 5.1 it swallowed
+    # the -AsHashtable parameter-binding error, reported a healthy file as untrusted, and
+    # drove a spurious re-seed and session restart on every install.
+    $raw = try { Get-Content $file -Raw -ErrorAction Stop } catch { return $false }
+    $projects = Read-ClaudeProjectMap $raw
+    if (-not $projects) { return $false }
 
     foreach ($f in (@($Directory.Replace('/', '\'), $Directory.Replace('\', '/')) | Select-Object -Unique)) {
-        if (-not $j.projects.ContainsKey($f)) { return $false }
-        if (-not $j.projects[$f]['hasTrustDialogAccepted']) { return $false }
+        if (-not $projects.ContainsKey($f)) { return $false }
+        if (-not $projects[$f]['hasTrustDialogAccepted']) { return $false }
     }
     return $true
 }
