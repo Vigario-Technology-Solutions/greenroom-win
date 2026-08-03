@@ -9,5 +9,8 @@
 # Deliberately NOT `eol=lf`: that would rewrite every working copy on Windows for no gain.
 * text=auto
 
-# Binary, so git never tries to diff or normalise it.
+# Binary, so git never tries to diff or normalise it. `text=auto` above would almost
+# certainly detect these anyway, but "almost certainly" is not what you want standing
+# between a demo recording and CRLF translation.
 *.png binary
+*.gif binary
