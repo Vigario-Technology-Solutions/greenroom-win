@@ -9,6 +9,22 @@ it. 0.1.0 at the bottom is hand-written and reads "Initial release." because a f
 release has no changes to list — there is nothing it changed from.
 
 - - -
+## [v0.3.0](https://github.com/Vigario-Technology-Solutions/greenroom-win/compare/450e75014633d73812b9bb7927868738d124f076..v0.3.0) - 2026-08-03
+#### Features
+- (**install**) pin the model an instance launches with (#36) - ([8adb1af](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/8adb1afb95ec9af2fa4676ee56a8fdba1130e5a9)) - Tyler Vigario, Claude Opus 4.8
+- (**package**) give the module an icon (#39) - ([3f2032b](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/3f2032bd9593865183a04014e4eb20ef4c75b942)) - Tyler Vigario, Claude Opus 4.8
+- (**release**) put each version's own changes in the manifest (#38) - ([4b3c99e](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/4b3c99eace8ce88d12e9503a59ea7e0dc0c88b87)) - Tyler Vigario, Claude Opus 4.8
+- (**release**) publish the module to the PowerShell Gallery (#37) - ([7befcc2](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/7befcc2a96da38271b4ced2cf2e707258280330f)) - Tyler Vigario, Claude Opus 4.8
+- make module version drift visible and fixable (#35) - ([78f06d5](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/78f06d5b8d6170d107d2b77e04bbb0bb684dfebb)) - Tyler Vigario, Claude Opus 4.8
+#### Documentation
+- lead the README with a recording of the thing it describes (#41) - ([6719eb4](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/6719eb4b1776b2baee01a2d698cc73ee40a739ce)) - Tyler Vigario, Claude Opus 4.8
+- make the README a quick start and split the rest out (#40) - ([11c7768](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/11c77680b387cf2ae01002aee39f6d13b2ea3992)) - Tyler Vigario, Claude Opus 4.8
+- correct the release machinery's notes against the first real release (#34) - ([450e750](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/450e75014633d73812b9bb7927868738d124f076)) - Tyler Vigario, Claude Opus 4.8
+#### Continuous Integration
+- (**release**) refuse to release a commit whose checks are not green (#42) - ([1939618](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/1939618e06e684e7101f5403b02b618040381e6f)) - Tyler Vigario, Claude Opus 4.8
+
+- - -
+
 ## [v0.2.0](https://github.com/Vigario-Technology-Solutions/greenroom-win/compare/373c4116811162a190f90c4cc090becf6264b786..v0.2.0) - 2026-08-02
 #### Features
 - support Windows PowerShell 5.1 so greenroom runs on stock Windows (#31) - ([3eb7cf3](https://github.com/Vigario-Technology-Solutions/greenroom-win/commit/3eb7cf3b6e30c8c05541e45d400f5e824dbc6abe)) - Tyler Vigario, Claude Opus 4.8
