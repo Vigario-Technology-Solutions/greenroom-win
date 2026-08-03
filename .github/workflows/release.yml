@@ -125,6 +125,78 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           ref: main
 
+      # THE PRECONDITION THE REST OF THIS WORKFLOW ASSUMED WITHOUT CHECKING.
+      #
+      # Everything below is careful about failing before the point of no return, and yet
+      # the most important precondition -- the code works -- was never asked. `ref: main`
+      # plus branch protection was taken as proof, and it is not:
+      #
+      #   * `strict_required_status_checks_policy` is FALSE, so a branch need not be up to
+      #     date with main before merging. Two pull requests can each pass on their own and
+      #     the COMBINATION on main is never tested before it lands.
+      #   * CI does run on push to main, which catches that -- but nothing consulted the
+      #     result, so a red main released exactly as happily as a green one.
+      #   * the release App bypasses the ruleset, so "everything on main passed checks" is
+      #     not literally true.
+      #
+      # A published gallery version can be unlisted but never deleted, so shipping from a
+      # red commit is not something a re-run fixes.
+      #
+      # The required contexts are read from the ruleset payload rather than restated here:
+      # that file is the source of truth for what must pass, and a second copy would drift.
+      - name: Verify the commit being released is green
+        id: gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          $sha = (git rev-parse HEAD).Trim()
+          Write-Output "releasing $sha"
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          $payload  = Get-Content .github/rulesets/main.json -Raw | ConvertFrom-Json
+          $required = @($payload.rules |
+              Where-Object { $_.type -eq 'required_status_checks' } |
+              ForEach-Object { $_.parameters.required_status_checks.context })
+          if ($required.Count -eq 0) { throw 'no required contexts found in the ruleset payload' }
+
+          # @tsv, not an interpolated jq string: a backtick-t inside single quotes is a
+          # PowerShell escape that PowerShell never applies, so jq received a literal
+          # backtick and emitted no tabs -- every context then parsed as "never reported"
+          # and the guard refused a genuinely green commit. Measured, not theorised.
+          $lines = @(gh api "repos/$env:GITHUB_REPOSITORY/commits/$sha/check-runs" --paginate `
+                       --jq '.check_runs[] | [.name, .status, .conclusion] | @tsv')
+          $runs = @{}
+          foreach ($l in $lines) {
+              $n, $status, $conclusion = $l -split "`t"
+              # Keep the most recent result for a name; re-runs report more than once.
+              if (-not $runs.ContainsKey($n)) { $runs[$n] = @{ Status = $status; Conclusion = $conclusion } }
+          }
+
+          $bad = @()
+          foreach ($c in $required) {
+              $r = $runs[$c]
+              if (-not $r)                        { $bad += "$c -- never reported"; continue }
+              if ($r.Status -ne 'completed')      { $bad += "$c -- still $($r.Status)"; continue }
+              switch ($r.Conclusion) {
+                  'success' { Write-Output "  ok      $c" }
+                  # `pr-title` cannot run on a push to main, so it reports skipped there.
+                  # Accept it, but SAY so: a check that silently did not run is the thing
+                  # this guard exists to notice.
+                  'skipped' { Write-Output "  skipped $c  (did not run on this commit)" }
+                  default   { $bad += "$c -- $($r.Conclusion)" }
+              }
+          }
+
+          if ($bad.Count -gt 0) {
+              Write-Output ''
+              throw ("refusing to release $sha, required checks are not green:`n  " +
+                     ($bad -join "`n  ") +
+                     "`nA published version can be unlisted but never deleted, so this is not " +
+                     'something a re-run undoes. Fix main, let CI go green, then dispatch again.')
+          }
+          Write-Output "all $($required.Count) required checks are green"
+
       - name: Install cocogitto
         run: |
           set -euo pipefail
@@ -255,6 +327,7 @@ jobs:
               echo "Dry run — nothing was changed."
             else
               echo "Released. The tag, the changelog and ModuleVersion moved together."
+              echo "From commit \`${{ steps.gate.outputs.sha }}\`, verified green before anything was created."
               echo
               echo '```powershell'
               echo "Update-PSResource Greenroom     # or Install-PSResource Greenroom -TrustRepository"
