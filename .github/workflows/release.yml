@@ -155,9 +155,18 @@ jobs:
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
           $payload  = Get-Content .github/rulesets/main.json -Raw | ConvertFrom-Json
+          # `.context` on that array is PowerShell MEMBER ENUMERATION: it returns the
+          # property from every element, so this yields the seven context strings rather
+          # than $null. Verified against the real payload -- 7 values, no empties.
+          #
+          # The Where-Object is defensive, not a fix: a malformed entry carrying no context
+          # would otherwise surface as a nameless "-- never reported" line, which is a
+          # confusing way to discover the payload is wrong. The json gate phase would
+          # normally catch that long before a release.
           $required = @($payload.rules |
               Where-Object { $_.type -eq 'required_status_checks' } |
-              ForEach-Object { $_.parameters.required_status_checks.context })
+              ForEach-Object { $_.parameters.required_status_checks.context } |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
           if ($required.Count -eq 0) { throw 'no required contexts found in the ruleset payload' }
 
           # @tsv, not an interpolated jq string: a backtick-t inside single quotes is a
