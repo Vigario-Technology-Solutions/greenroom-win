@@ -4,9 +4,10 @@ Always-on **Claude Code Remote Control** sessions on Windows. Each instance star
 hidden at logon, stays supervised, and is revealed on demand with its full live
 scrollback — not a resumed copy.
 
-![A session that has been running since logon, hidden. Get-GreenroomInstance reports it
-as not visible; Show-GreenroomSession brings the live window onto the desktop; Hide-
-puts it away again while it keeps running.](assets/greenroom-demo.gif)
+![Show-GreenroomSession revealing a hidden session, then hiding it again](assets/greenroom-demo.gif)
+
+*Running since logon, never on screen. One command reveals it, another puts it away — it
+keeps running either way.*
 
 A green room is where the performer waits: always there, out of sight, called on
 stage the moment you want them.
