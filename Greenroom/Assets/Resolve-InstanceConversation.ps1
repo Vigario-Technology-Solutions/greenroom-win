@@ -47,6 +47,18 @@ function Resolve-InstanceConversation {
         catch { $pinned = $null }   # unreadable state reads as no state, never fatal
     }
 
+    # The pin gets the SAME rule as the store listing. conversation.json is a file on
+    # disk and is hand-written during a deliberate cutover, so it is untrusted input: a
+    # value that is not a session id must never reach --resume. A bare existence check is
+    # not enough, because the way a malformed pin survives one is by naming a file that
+    # happens to exist. A malformed pin reads as no pin, and says so in the log rather
+    # than being dropped quietly -- the window is hidden, so silence is the failure mode.
+    $note = ''
+    if ($null -ne $pinned -and ($pinned -isnot [string] -or $pinned -notmatch $uuid)) {
+        $note   = "ignoring malformed pin '$pinned' -- "
+        $pinned = $null
+    }
+
     if ($pinned) {
         if (Test-Path -LiteralPath (Join-Path $Store "$pinned.jsonl")) {
             return [pscustomobject]@{
@@ -84,7 +96,7 @@ function Resolve-InstanceConversation {
             SessionId = $adopt
             Action    = 'resume'
             Persist   = $true
-            Reason    = "adopting newest of $($existing.Count) existing conversation(s) and pinning it: $adopt"
+            Reason    = "$note" + "adopting newest of $($existing.Count) existing conversation(s) and pinning it: $adopt"
         }
     }
 
@@ -93,6 +105,6 @@ function Resolve-InstanceConversation {
         SessionId = $fresh
         Action    = 'create'
         Persist   = $true
-        Reason    = "no existing conversation -- pinning new $fresh"
+        Reason    = "$note" + "no existing conversation -- pinning new $fresh"
     }
 }

@@ -165,7 +165,6 @@ if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
 # Anything else that ran claude in this directory -- a hand-started session, most
 # obviously -- leaves a newer transcript, and the next restart silently adopts it.
 # Two processes then append to one transcript with no error and no detection.
-# See docs/greenroom-cutover.md.
 #
 # So: settle on an id once and keep resuming that exact id. --resume reuses the
 # original session id rather than forking (forking is opt-in, via --fork-session), so

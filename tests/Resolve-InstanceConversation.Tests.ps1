@@ -84,6 +84,35 @@ Describe 'Resolve-InstanceConversation' {
             $r.SessionId | Should -Match $script:UUID
         }
 
+        It 'refuses a pin that is not a session id, even when it names a real file' {
+            # The dangerous shape: a pin that survives a bare existence check by naming a
+            # file that happens to exist. Resuming it exits 1 in a hidden window.
+            # conversation.json is hand-written during a cutover, so this is reachable.
+            $store = Join-Path $TestDrive 'store11'
+            $pin   = Join-Path $TestDrive 'conv11.json'
+            $real  = '34f1855b-076a-46a7-80b6-12406932e6e1'
+            FakeTranscript -Store $store -Id $real -When ([datetime]'2026-08-01') | Out-Null
+            Set-Content -LiteralPath (Join-Path $store 'notes.jsonl') -Value '{}' -Encoding UTF8
+            FakePin -Path $pin -Id 'notes'
+
+            $r = Resolve-InstanceConversation -Store $store -StatePath $pin
+            $r.SessionId | Should -Not -Be 'notes'
+            $r.SessionId | Should -Match $script:UUID
+            $r.Reason    | Should -Match 'malformed pin'
+        }
+
+        It 'refuses a pin that is not even a string' {
+            $store = Join-Path $TestDrive 'store12'
+            $pin   = Join-Path $TestDrive 'conv12.json'
+            New-Item -ItemType Directory -Path $store -Force | Out-Null
+            [pscustomobject]@{ sessionId = 42 } | ConvertTo-Json |
+                Set-Content -LiteralPath $pin -Encoding UTF8
+
+            $r = Resolve-InstanceConversation -Store $store -StatePath $pin
+            $r.Action    | Should -Be 'create'
+            $r.SessionId | Should -Match $script:UUID
+        }
+
         It 'treats an unreadable pin as no pin instead of throwing' {
             $store = Join-Path $TestDrive 'store4'
             $pin   = Join-Path $TestDrive 'conv4.json'
