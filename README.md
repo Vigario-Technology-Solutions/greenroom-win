@@ -23,6 +23,9 @@ directory, its own directory grants, and its own name in the Remote Control UI.
 > That is enforced rather than promised: while the major is zero a breaking change
 > bumps the minor, so reaching `1.0.0` cannot happen by accident. It takes someone
 > deciding the surface is worth keeping.
+>
+> `1.0.0` will mean the surface has stopped moving, not that the feature list is
+> finished — a condition to be met rather than a date to arrive at.
 
 ---
 
@@ -181,7 +184,7 @@ after a kill on the reference host was ~1.4 s.
 | Document | What is in it |
 |---|---|
 | [docs/provisioning.md](docs/provisioning.md) | what a host needs and why each item is a requirement — plus elevated instances, multiple instances, and upgrading |
-| [docs/gotchas.md](docs/gotchas.md) | **the part worth reading** — the Windows behaviours that defeated more obvious designs |
+| [docs/gotchas.md](docs/gotchas.md) | **the part worth reading** — what does not behave the way it obviously should, and what never got cleanly resolved |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | symptoms, logs, and how to confirm an install actually worked |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | working from source, the gate, repository layout, releases |
 

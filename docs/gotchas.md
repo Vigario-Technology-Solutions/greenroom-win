@@ -1,8 +1,8 @@
-# Why it is built this way
+# Gotchas
 
-Six Windows behaviours defeated more obvious designs. Each one is the reason for a
-specific piece of the architecture, and each cost real debugging time that is
-invisible in the finished code.
+Things that do not behave the way they obviously should, and residue that never got
+cleanly resolved and can still bite you. Not a rationale archive — why a piece is built
+the way it is lives in the commits, with receipts.
 
 If you are porting this concept to another platform, this file is the part worth
 reading. The scripts are disposable; these are not.

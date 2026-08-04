@@ -141,13 +141,15 @@ if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
 # reference host nine accumulated in a single day; eight were ~1 KB stubs holding
 # nothing but a session header.
 #
-# GUARDED ON PURPOSE. Measured, all three on the same host and build (2.1.218):
+# The conversation is pinned BY ID rather than reached for by recency. Measured on
+# 2.1.218 and re-checked on 2.1.220:
 #
-#   --session-id <uuid>, pinned per instance
+#   --session-id <uuid> on EVERY launch
 #       Create-only. The second launch exits 1 with "Session ID ... is already in
-#       use". A pinned id would work exactly once and then fail on every restart
-#       thereafter -- inside a hidden window, so the watchdog would crash-loop with
-#       nothing on screen. Dead end, do not revisit.
+#       use". Pinning it unconditionally works exactly once and fails on every
+#       restart thereafter -- inside a hidden window, so the watchdog crash-loops
+#       with nothing on screen. That is why it appears below only on the FIRST
+#       launch, where create is exactly the operation wanted.
 #
 #   -c with NO prior transcript
 #       Exits 1 under --remote-control. This is the trap: `claude -p ... -c` in an
@@ -158,7 +160,26 @@ if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
 #   -c WITH a prior transcript
 #       Session comes up, the existing transcript is appended to, no fork.
 #
-# So the flag is only safe when there is something to continue, hence the guard.
+# -c is nevertheless the WRONG primitive here, and this is the bug it caused:
+# it continues the NEWEST transcript in the project store, not this instance's.
+# Anything else that ran claude in this directory -- a hand-started session, most
+# obviously -- leaves a newer transcript, and the next restart silently adopts it.
+# Two processes then append to one transcript with no error and no detection.
+# See docs/greenroom-cutover.md.
+#
+# So: settle on an id once and keep resuming that exact id. --resume reuses the
+# original session id rather than forking (forking is opt-in, via --fork-session), so
+# the id stays stable across every restart for the life of the instance.
+#
+# Where an instance starts a directory that ALREADY holds conversations, the first
+# launch adopts the newest and pins it. Recency is used exactly once, to pick a
+# starting point; identity governs every launch after. That is bootstrap rather than
+# migration -- it is as true of a fresh install into a directory you have been using
+# by hand as it is of an instance that predates the pin.
+#
+# The guard keeps the same SHAPE as the -c guard it replaces -- do not resume what
+# does not exist, or the hidden window crash-loops -- but is keyed to identity rather
+# than recency. See Resolve-InstanceConversation.ps1 next door for the branches.
 #
 # The slug is derived from Get-Location AFTER Set-Location rather than from
 # $cfg.workingDirectory: Claude Code keys the project store on the LITERAL cwd
@@ -166,12 +187,31 @@ if ($cfg.additionalDirectories -and @($cfg.additionalDirectories).Count -gt 0) {
 # the resolved location is what keeps the two in agreement.
 $slug  = ((Get-Location).Path -replace '[^A-Za-z0-9]', '-')
 $store = Join-Path $env:USERPROFILE ".claude\projects\$slug"
-$prior = @(Get-ChildItem -LiteralPath $store -Filter *.jsonl -ErrorAction SilentlyContinue)
-if ($prior.Count -gt 0) {
-    $claudeArgs += '-c'
-    Log "continuing previous conversation (-c); $($prior.Count) transcript(s) in $slug"
-} else {
-    Log "no prior transcript in $slug -- starting fresh (-c would exit 1 here)"
+
+# conversation.json is owned by the LAUNCHER, not by Install-. config.json is the
+# module's to write; this is state discovered at runtime and must not be lost.
+$convPath = Join-Path $stateDir 'conversation.json'
+
+# The decision itself lives next door so it can be tested without a running instance.
+# Found via $PSScriptRoot, not Import-Module: the task hard-codes a versioned asset
+# path, and an import could resolve to a different version than the assets in play.
+. (Join-Path $PSScriptRoot 'Resolve-InstanceConversation.ps1')
+$conv = Resolve-InstanceConversation -Store $store -StatePath $convPath
+Log $conv.Reason
+
+if ($conv.Action -eq 'resume') { $claudeArgs += @('--resume',     $conv.SessionId) }
+else                           { $claudeArgs += @('--session-id', $conv.SessionId) }
+
+# Recorded BEFORE exec on purpose. If claude dies early the id is still on disk, so the
+# next launch resumes it rather than minting another and leaving the first orphaned --
+# which is the transcript-stub accumulation described above.
+if ($conv.Persist) {
+    try {
+        [pscustomobject]@{ sessionId = $conv.SessionId; pinned = (Get-Date -Format 'o') } |
+            ConvertTo-Json | Set-Content -LiteralPath $convPath -Encoding UTF8
+    } catch {
+        Log "WARN: could not record session id, next launch will decide again -- $_"
+    }
 }
 
 Log "exec: $($cfg.claudeExe) $($claudeArgs -join ' ')"
