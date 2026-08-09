@@ -30,6 +30,19 @@ inputs:
 runs:
   using: composite
   steps:
+    # Pinned by commit, like every third-party action here: a tag moves and a commit does
+    # not, so the pin is what bounds the code this runs.
+    #
+    # THE ALLOWLIST NEEDS THE WHOLE CLOSURE, NOT JUST THIS LINE. setup-just is itself a
+    # composite action and calls `extractions/setup-crate`, so the repository allowlist
+    # carries BOTH `extractions/setup-just@*` and `extractions/setup-crate@*`. Allowing
+    # only what appears in this file fails at "Prepare all required actions" with a
+    # transitive action named in the error and nothing in the tree mentioning it.
+    #
+    # Pinning still holds across that hop: upstream pins its own dependency by commit, so
+    # this SHA determines the entire tree that runs. What the allowlist bounds is which
+    # repositories may be reached at all -- and a future setup-just release could reach a
+    # different one, which would fail loudly here rather than pull in code unnoticed.
     - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
     # Provisioning is a NAMED STEP, not something a check does to a machine on its way
