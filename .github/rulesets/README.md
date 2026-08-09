@@ -1,9 +1,17 @@
 # Rulesets
 
-`main.json` is the branch protection payload, applied under the name
-**`main-protection`**. It is committed because a ruleset is applied state that
-lives only on GitHub: it vanishes silently on repository recreate, rename or fork,
-and nothing in a clone reveals it is gone.
+Two payloads, applied under the names **`main-protection`** and
+**`tag-protection`** — named for what they target, never for what they contain, so
+a name stays true when the rules inside it change.
+
+| File | Applied as | Target |
+|---|---|---|
+| `main.json` | `main-protection` | the default branch |
+| `tag-protection.json` | `tag-protection` | every tag |
+
+They are committed because a ruleset is applied state that lives only on GitHub: it
+vanishes silently on repository recreate, rename or fork, and nothing in a clone
+reveals it is gone.
 
 **The file is the source of truth. Apply it; do not hand-configure.** This payload
 spent several commits describing protection that had been set by hand and never
@@ -67,3 +75,21 @@ environment — required reviewer, limited to `main` — rather than repository-
 
 To push by hand instead, set `enforcement` to `disabled` first — a deliberate,
 visible act rather than a standing exemption.
+
+## `tag-protection`
+
+One version must never name two sets of bits. The tag is published as the name of
+what shipped, so it has to keep meaning that whether or not anything builds from it.
+
+`deletion` and `non_fast_forward`, over `~ALL` tags. Creating a tag is neither, so
+the release still tags normally — which is why this payload carries **no bypass
+actor at all**, unlike `main-protection`. Nothing needs an exemption to do the one
+thing releases do.
+
+**It only holds for annotated tags.** `non_fast_forward` blocks re-pointing an
+annotated tag, but a *lightweight* tag moved to a descendant is a fast-forward and
+passes. Immutability therefore rests on releases being cut with `--annotated`, which
+`release.yml` does; a lightweight tag would slip past this ruleset without error.
+
+This arrives with the first tag and not before — a rule guarding a namespace nothing
+writes to is a claim without a subject.

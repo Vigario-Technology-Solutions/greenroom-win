@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Vigario-Technology-Solutions/greenroom-win/security/advisories/new
+    about: Report privately. Do not open a public issue for something exploitable.
+  - name: Claude Code itself
+    url: https://github.com/anthropics/claude-code/issues
+    about: This project is not affiliated with Anthropic. Bugs in the CLI belong there.

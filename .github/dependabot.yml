@@ -1,0 +1,26 @@
+# Dependency updates.
+#
+# GitHub Actions is the only ecosystem here — the module has no package manifest, and its
+# one external tool (cocogitto) is installed as a pinned binary by the workflow rather than
+# resolved from a lockfile, so nothing else has a dependency graph to watch.
+#
+# This matters more than it looks, because actions are pinned BY COMMIT. A pinned action
+# never moves on its own, which is the point, but it also never gets a security fix on its
+# own — so without this the pins simply rot. Dependabot rewrites the SHA and the version
+# comment together, which keeps the pin honest and readable.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # A pull request is the only way anything reaches main, and every one of them runs the
+    # full gate. Grouping keeps that to one run rather than one per action.
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

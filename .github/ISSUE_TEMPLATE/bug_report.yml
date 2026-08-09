@@ -1,0 +1,77 @@
+name: Bug report
+description: Something does not behave the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Every failure in this architecture is silent, because the window is hidden.**
+        The logs below are usually the only evidence there is, so please include them even
+        if they look empty — an empty log is itself a finding.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The commands you ran, in order.
+      render: powershell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Instance logs
+      description: |
+        From `~/.claude/greenroom/<instance>/` — `watchdog.log` and `launch.log`.
+        Redact anything you consider sensitive; paths and instance names are usually fine.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Output of:
+
+        ```powershell
+        $PSVersionTable | Format-List PSVersion, PSEdition
+        (Get-Module Greenroom -ListAvailable).Version
+        Get-GreenroomInstance
+        (Get-Command claude).Source
+        [System.Environment]::OSVersion.Version
+        ```
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Is the instance elevated?
+      options:
+        - "No"
+        - "Yes"
+        - "Not sure — Get-GreenroomInstance shows it"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I read [docs/troubleshooting.md](../../blob/main/docs/troubleshooting.md)
+          required: false
+        - label: This is not a Claude Code or Windows Terminal bug reported against the wrong project
+          required: false
