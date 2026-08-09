@@ -17,12 +17,19 @@ reveals it is gone.
 spent several commits describing protection that had been set by hand and never
 matched it, which is the failure it exists to prevent.
 
+**Both payloads are applied, and each is a separate call.** Applying one leaves the
+other unenforced with nothing to indicate it — which is the exact failure this
+directory exists to prevent, so it is worth being explicit that there are two.
+
 ```bash
 # create
 gh api repos/<org>/<repo>/rulesets --method POST --input .github/rulesets/main.json
+gh api repos/<org>/<repo>/rulesets --method POST --input .github/rulesets/tag-protection.json
 
-# update an existing one
-gh api repos/<org>/<repo>/rulesets/<id> --method PUT --input .github/rulesets/main.json
+# update an existing one -- ids differ per ruleset, so list them first
+gh api repos/<org>/<repo>/rulesets --jq '.[] | "\(.id)  \(.name)"'
+gh api repos/<org>/<repo>/rulesets/<main-id> --method PUT --input .github/rulesets/main.json
+gh api repos/<org>/<repo>/rulesets/<tag-id>  --method PUT --input .github/rulesets/tag-protection.json
 ```
 
 Read back what is enforced from the **rules** endpoint. The legacy
@@ -32,6 +39,14 @@ is not:
 
 ```bash
 gh api repos/<org>/<repo>/rules/branches/main
+```
+
+**There is no tag equivalent of that endpoint.** `rules/tags/<tag>` returns 404 even
+with `tag-protection` active, so verifying the tag payload means reading the ruleset
+back by id and comparing it to the file:
+
+```bash
+gh api repos/<org>/<repo>/rulesets/<tag-id> --jq '{name, target, enforcement, bypass_actors, rules: [.rules[].type]}'
 ```
 
 ## Things that will catch you

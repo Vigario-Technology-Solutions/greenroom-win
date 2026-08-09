@@ -71,7 +71,7 @@ body:
     attributes:
       label: Before filing
       options:
-        - label: I read [docs/troubleshooting.md](../../blob/main/docs/troubleshooting.md)
+        - label: I read [docs/troubleshooting.md](https://github.com/Vigario-Technology-Solutions/greenroom-win/blob/main/docs/troubleshooting.md)
           required: false
         - label: This is not a Claude Code or Windows Terminal bug reported against the wrong project
           required: false

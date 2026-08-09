@@ -13,10 +13,11 @@ There is no bounty and no SLA to promise. This is a small project with one maint
 what you will get is an acknowledgement and an honest answer about whether and when it
 will be fixed.
 
-## What version is supported
+## What versions are supported
 
-The latest release on the [PowerShell Gallery](https://www.powershellgallery.com/packages/Greenroom).
-While the major version is zero there are no backports — a fix ships in the next release
+Only the latest release on the
+[PowerShell Gallery](https://www.powershellgallery.com/packages/Greenroom) is supported.
+While the major version is zero there are no backports — a fix ships in the next release,
 and older versions are not patched.
 
 ## What is in scope
